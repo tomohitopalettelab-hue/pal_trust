@@ -5,6 +5,44 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTheme } from '../components/ThemeProvider';
 import LoadingSpinner from '../components/LoadingSpinner';
+import NoticeToast from '../components/NoticeToast';
+import { useNotice } from '../components/useNotice';
+
+type SurveyItem = {
+  id: number;
+  text: string;
+  type: 'rating' | 'free' | 'choice' | string;
+  options?: string[];
+};
+
+const DEFAULT_SURVEY_ITEMS: SurveyItem[] = [
+  { id: 1, text: "接客の満足度はどうでしたか？", type: "rating" },
+  { id: 2, text: "具体的に良かった点や改善点を教えてください", type: "free" },
+];
+
+const normalizeSurveyItems = (items: unknown): SurveyItem[] => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return DEFAULT_SURVEY_ITEMS;
+  }
+
+  const normalized = items
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const row = item as Record<string, unknown>;
+      const rawOptions = Array.isArray(row.options) ? row.options : [];
+      return {
+        id: typeof row.id === 'number' ? row.id : Date.now() + index,
+        text: String(row.text || ''),
+        type: String(row.type || 'free'),
+        options: rawOptions.map((opt) => String(opt).trim()).filter(Boolean),
+      } as SurveyItem;
+    })
+    .filter((item): item is SurveyItem => Boolean(item));
+
+  return normalized.length > 0 ? normalized : DEFAULT_SURVEY_ITEMS;
+};
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -25,15 +63,13 @@ export default function AdminDashboard() {
     googleMapUrl: "https://goo.gl/maps/xxxx",
   });
 
-  const [surveyItems, setSurveyItems] = useState([
-    { id: 1, text: "接客の満足度はどうでしたか？", type: "rating" },
-    { id: 2, text: "具体的に良かった点や改善点を教えてください", type: "free" },
-  ]);
+  const [surveyItems, setSurveyItems] = useState<SurveyItem[]>(DEFAULT_SURVEY_ITEMS);
 
   const [isSaving, setIsSaving] = useState(false);
-    const [showToast, setShowToast] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
+  const [customerActive, setCustomerActive] = useState<boolean | null>(null);
+  const { notice, showNotice, clearNotice } = useNotice();
 
   const { changeTheme } = useTheme();
 
@@ -54,7 +90,37 @@ export default function AdminDashboard() {
 
   // --- DBから設定を読み込む ---
   useEffect(() => {
+    if (authChecking || !customerId) {
+      return;
+    }
+
+    let isMounted = true;
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(`/api/customer-status?customerId=${encodeURIComponent(customerId)}`);
+        const data = await res.json();
+        if (!isMounted) return;
+        setCustomerActive(Boolean(data?.exists && data?.isActive));
+      } catch {
+        if (!isMounted) return;
+        setCustomerActive(false);
+      }
+    };
+    checkStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authChecking, customerId]);
+
+  // --- DBから設定を読み込む ---
+  useEffect(() => {
     if (authChecking) {
+      return;
+    }
+
+    if (customerActive !== true) {
+      setIsLoading(false);
       return;
     }
 
@@ -64,16 +130,16 @@ export default function AdminDashboard() {
         const data = await res.json();
         if (data && data.settings) {
           setSettings(data.settings);
-          setSurveyItems(data.surveyItems);
+          setSurveyItems(normalizeSurveyItems(data.surveyItems));
         }
-      } catch (e) {
+      } catch {
         console.error("設定の読み込みに失敗しました");
       } finally {
         setIsLoading(false);
       }
     }
     loadSettings();
-  }, [authChecking, customerId]);
+  }, [authChecking, customerId, customerActive]);
 
   const addSurveyItem = () => {
     if (surveyItems.length < 20) {
@@ -85,33 +151,115 @@ export default function AdminDashboard() {
     setSurveyItems(surveyItems.filter(item => item.id !== id));
   };
 
-  const updateSurveyItem = (id: number, fields: any) => {
+  const moveSurveyItem = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    setSurveyItems((prev) => {
+      if (targetIndex < 0 || targetIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+      return next;
+    });
+  };
+
+  const updateSurveyItem = (id: number, fields: Partial<Pick<SurveyItem, 'text' | 'type' | 'options'>>) => {
     setSurveyItems(surveyItems.map(item => item.id === id ? { ...item, ...fields } : item));
+  };
+
+  const finalizeSurveyItemOptions = (itemId: number, triggerElement?: HTMLElement | null) => {
+    setSurveyItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item;
+        const options = (item.options || []).map((opt) => opt.trim()).filter(Boolean);
+        return { ...item, options };
+      })
+    );
+
+    const detailsElement = triggerElement?.closest('details');
+    if (detailsElement) {
+      detailsElement.removeAttribute('open');
+    }
+  };
+
+  const moveSurveyItemOption = (itemId: number, optionIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? optionIndex - 1 : optionIndex + 1;
+    setSurveyItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item;
+        const options = [...(item.options || [])];
+        if (targetIndex < 0 || targetIndex >= options.length) {
+          return item;
+        }
+        const temp = options[optionIndex];
+        options[optionIndex] = options[targetIndex];
+        options[targetIndex] = temp;
+        return { ...item, options };
+      })
+    );
+  };
+
+  const updateSurveyItemOption = (itemId: number, optionIndex: number, value: string) => {
+    setSurveyItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item;
+        const options = [...(item.options || [])];
+        options[optionIndex] = value;
+        return { ...item, options };
+      })
+    );
+  };
+
+  const addSurveyItemOption = (itemId: number) => {
+    setSurveyItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item;
+        const options = [...(item.options || []), ''];
+        return { ...item, options };
+      })
+    );
+  };
+
+  const removeSurveyItemOption = (itemId: number, optionIndex: number) => {
+    setSurveyItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item;
+        const options = [...(item.options || [])].filter((_, index) => index !== optionIndex);
+        return { ...item, options };
+      })
+    );
   };
 
   // --- DBへ設定を保存する ---
   const handleSave = async () => {
+    const sanitizedSurveyItems = surveyItems.filter((item) => String(item.text || '').trim().length > 0);
+    if (sanitizedSurveyItems.length !== surveyItems.length) {
+      setSurveyItems(sanitizedSurveyItems);
+      showNotice('質問文が空の設問を削除して保存します', 'info');
+    }
+
     setIsSaving(true);
     try {
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, settings, surveyItems }),
+        body: JSON.stringify({ customerId, settings, surveyItems: sanitizedSurveyItems }),
       });
       if (res.ok) {
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 3000);
+        showNotice('保存しました！');
       } else {
         throw new Error();
       }
-    } catch (e) {
-      alert("保存に失敗しました。");
+    } catch {
+      showNotice('保存に失敗しました。', 'error');
     } finally {
       setIsSaving(false);
     }
   };
 
-  if (isLoading) {
+  if (isLoading || customerActive === null) {
     return <LoadingSpinner />;
   }
 
@@ -119,24 +267,26 @@ export default function AdminDashboard() {
     return <LoadingSpinner />;
   }
 
-  return (
-<div className="min-h-screen font-sans lg:flex text-[var(--theme-text)] relative">
-      {/* --- 自作ポップアップ（背景色をテーマカラーに変更・影なし） --- */}
-      <div className={`fixed top-10 left-1/2 -translate-x-1/2 z-[100] transition-all duration-500 ease-out ${showToast ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10 pointer-events-none'}`}>
-        <div 
-          className="px-10 py-5 rounded-[2.5rem] border-4 border-black flex items-center gap-4 animate-in fade-in zoom-in-95 duration-300"
-          style={{ 
-            backgroundColor: 'var(--theme-primary)', 
-            color: 'var(--theme-on-primary)' 
-          }}
-        >
-          <span className="text-2xl">★</span>
-          <div className="flex flex-col text-left">
-            <p className="font-black italic tracking-tighter text-2xl uppercase leading-none">Settings Saved!</p>
-            <p className="text-[10px] font-black opacity-70 tracking-widest mt-1">設定を保存して反映しました</p>
-          </div>
+  if (customerActive === false) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
+        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-8 text-center space-y-4">
+          <h1 className="text-2xl font-black italic">この顧客URLは現在停止中です</h1>
+          <p className="text-sm font-bold text-[var(--theme-text)]/70">管理者にお問い合わせください。</p>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen font-sans selection:bg-[var(--theme-primary)] text-[var(--theme-text)]">
+      {notice && (
+        <NoticeToast
+          message={notice.message}
+          variant={notice.variant}
+          onClose={clearNotice}
+        />
+      )}
       {/* 保存中のローディングオーバーレイ */}
       {isSaving && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -147,18 +297,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* サイドナビ */}
-      <aside className="hidden lg:flex w-24 xl:w-64 bg-[var(--theme-card-bg)] border-r border-[var(--theme-border)] flex-col items-center py-10 sticky top-0 h-screen">
-        <div className="font-black text-[var(--theme-text)] italic text-xl mb-16 xl:text-2xl tracking-tighter">PT. ADMIN</div>
-        <nav className="flex flex-col gap-10 flex-1">
-          <div className="flex flex-col items-center gap-2">
-            <span className={`w-3 h-3 rounded-full bg-[var(--theme-primary)]`} />
-            <span className={`hidden xl:block text-[10px] font-black tracking-widest text-[var(--theme-primary)]`}>システム設定</span>
-          </div>
-        </nav>
-      </aside>
-
-      <main className="flex-1 p-5 md:p-10 lg:p-16 max-w-[1000px] mx-auto w-full space-y-10">
+      <main className="max-w-7xl mx-auto p-6 md:p-12 w-full space-y-10">
 
         <header>
           <p className="text-xs font-black text-[var(--theme-text)] opacity-60 uppercase tracking-widest">Administrator</p>
@@ -201,16 +340,6 @@ export default function AdminDashboard() {
                 <option value="4">星4以上</option>
                 <option value="3">星3以上</option>
               </select>
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">誘導先 Google Map URL</label>
-              <input
-                type="text"
-                value={settings.googleMapUrl}
-                onChange={(e) => setSettings({ ...settings, googleMapUrl: e.target.value })}
-                placeholder="https://goo.gl/maps/..."
-                className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold outline-none"
-              />
             </div>
           </div>
         </section>
@@ -255,39 +384,131 @@ export default function AdminDashboard() {
 
         {/* 2. アンケート項目設定 */}
         <section className="bg-[var(--theme-card-bg)] rounded-[2rem] border-3 border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-black flex items-center gap-2 italic">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center items-start gap-3 mb-6">
+            <h2 className="text-xl font-black flex items-center gap-2 italic leading-tight break-words">
               <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
               アンケート項目設定 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal italic">SURVEY ITEMS</span>
             </h2>
-            <button onClick={addSurveyItem} className={`bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-2 border-[var(--theme-border)] px-4 py-2 rounded-xl font-black text-xs shadow-[3px_3px_0px_var(--theme-border)]`}>
+            <button onClick={addSurveyItem} className={`w-full sm:w-auto text-center whitespace-normal leading-tight bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-2 border-[var(--theme-border)] px-4 py-2 rounded-xl font-black text-xs shadow-[3px_3px_0px_var(--theme-border)]`}>
               ＋ 項目を追加
             </button>
           </div>
           <div className="grid grid-cols-1 gap-4">
             {surveyItems.map((item, index) => (
               <div key={item.id} className="flex flex-col md:flex-row gap-3 bg-[var(--theme-text)]/5 p-4 border-2 border-[var(--theme-border)] rounded-xl">
-                <div className="flex items-center gap-3 flex-1">
+                <div className="flex flex-wrap items-center gap-2 w-full">
                   <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 w-4">{index + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => moveSurveyItem(index, 'up')}
+                    disabled={index === 0}
+                    className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveSurveyItem(index, 'down')}
+                    disabled={index === surveyItems.length - 1}
+                    className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
+                  >
+                    ↓
+                  </button>
+                </div>
+                <div className="w-full">
                   <input
                     type="text"
                     value={item.text}
                     onChange={(e) => updateSurveyItem(item.id, { text: e.target.value })}
-                    className="flex-1 bg-transparent font-bold text-sm outline-none"
+                    className="w-full bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-3 py-2 rounded-lg font-bold text-sm leading-relaxed outline-none"
                     placeholder="質問文を入力してください"
                   />
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                   <select
                     value={item.type}
-                    onChange={(e) => updateSurveyItem(item.id, { type: e.target.value })}
-                    className="bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-3 py-1 rounded-lg font-black text-xs outline-none"
+                    onChange={(e) => {
+                      const nextType = e.target.value;
+                      if (nextType === 'choice') {
+                        updateSurveyItem(item.id, {
+                          type: nextType,
+                          options: item.options && item.options.length > 0 ? item.options : ['はい', 'いいえ'],
+                        });
+                        return;
+                      }
+                      updateSurveyItem(item.id, { type: nextType });
+                    }}
+                    className="w-full sm:w-auto max-w-full bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-3 py-1 rounded-lg font-black text-xs outline-none"
                   >
                     <option value="rating">★評価(1-5)</option>
                     <option value="free">自由入力</option>
+                    <option value="choice">選択肢</option>
                   </select>
-                  <button onClick={() => removeSurveyItem(item.id)} className="text-gray-300 hover:text-red-500 font-black px-2">×</button>
+                  <button onClick={() => removeSurveyItem(item.id)} className="text-gray-300 hover:text-red-500 font-black px-2 whitespace-nowrap">×</button>
                 </div>
+                {item.type === 'choice' && (
+                  <div className="w-full md:basis-full mt-2 md:ml-0">
+                    <details className="bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] rounded-xl p-3">
+                      <summary className="cursor-pointer list-none flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-black text-[var(--theme-text)]/70 uppercase">選択肢を編集</span>
+                        <span className="text-[10px] font-black text-[var(--theme-text)]/60">{(item.options || []).length}件</span>
+                      </summary>
+
+                      <div className="space-y-2 mt-3">
+                        {(item.options || []).map((option, optionIndex, options) => (
+                          <div key={`${item.id}-opt-${optionIndex}`} className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => moveSurveyItemOption(item.id, optionIndex, 'up')}
+                              disabled={optionIndex === 0}
+                              className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveSurveyItemOption(item.id, optionIndex, 'down')}
+                              disabled={optionIndex === options.length - 1}
+                              className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
+                            >
+                              ↓
+                            </button>
+                            <input
+                              type="text"
+                              value={option}
+                              onChange={(e) => updateSurveyItemOption(item.id, optionIndex, e.target.value)}
+                              className="order-2 sm:order-none basis-full sm:basis-auto w-full sm:flex-1 sm:min-w-0 bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] p-2 rounded-lg font-bold text-sm outline-none"
+                              placeholder={`選択肢 ${optionIndex + 1}`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeSurveyItemOption(item.id, optionIndex)}
+                              className="order-3 sm:order-none px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black text-red-600"
+                            >
+                              削除
+                            </button>
+                          </div>
+                        ))}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => addSurveyItemOption(item.id)}
+                            className="px-3 py-2 rounded-lg border-2 border-[var(--theme-border)] font-black text-xs"
+                          >
+                            + 選択肢を追加
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => finalizeSurveyItemOptions(item.id, e.currentTarget)}
+                            className="px-3 py-2 rounded-lg border-2 border-[var(--theme-border)] font-black text-xs"
+                          >
+                            完了
+                          </button>
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                )}
               </div>
             ))}
           </div>

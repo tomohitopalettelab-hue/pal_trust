@@ -40,6 +40,7 @@ export default function ReportsPage() {
   const [reviewClickCount, setReviewClickCount] = useState(0);
   const [customerId, setCustomerId] = useState('');
   const [authChecking, setAuthChecking] = useState(true);
+  const [customerActive, setCustomerActive] = useState<boolean | null>(null);
 
   useEffect(() => {
     const loggedIn = localStorage.getItem('customerLoggedIn') === 'true';
@@ -58,7 +59,37 @@ export default function ReportsPage() {
 
   // --- DBからデータ取得 ---
   useEffect(() => {
+    if (authChecking || !customerId) {
+      return;
+    }
+
+    let isMounted = true;
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(`/api/customer-status?customerId=${encodeURIComponent(customerId)}`);
+        const data = await res.json();
+        if (!isMounted) return;
+        setCustomerActive(Boolean(data?.exists && data?.isActive));
+      } catch {
+        if (!isMounted) return;
+        setCustomerActive(false);
+      }
+    };
+    checkStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authChecking, customerId]);
+
+  // --- DBからデータ取得 ---
+  useEffect(() => {
     if (authChecking) {
+      return;
+    }
+
+    if (customerActive !== true) {
+      setLoading(false);
       return;
     }
 
@@ -99,7 +130,7 @@ export default function ReportsPage() {
       }
     };
     fetchData();
-  }, [customerId, authChecking, selectedFunnelMonth]);
+  }, [customerId, authChecking, selectedFunnelMonth, customerActive]);
 
   // --- 統計計算 ---
   const totalCount = allReviews.length;
@@ -215,12 +246,23 @@ export default function ReportsPage() {
     ? Math.max(...monthlyData.map((item) => item.count), 1)
     : 1;
 
-  if (authChecking) return <LoadingSpinner />;
+  if (authChecking || customerActive === null) return <LoadingSpinner />;
 
   if (loading) return <LoadingSpinner />;
 
+  if (customerActive === false) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
+        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-8 text-center space-y-4">
+          <h1 className="text-2xl font-black italic">この顧客URLは現在停止中です</h1>
+          <p className="text-sm font-bold text-[var(--theme-text)]/70">管理者にお問い合わせください。</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen font-sans selection:bg-[var(--theme-primary)] text-[var(--theme-text)] pb-20">
+    <div className="min-h-screen font-sans selection:bg-[var(--theme-primary)] text-[var(--theme-text)] pb-32 md:pb-20">
       <div className="max-w-7xl mx-auto p-6 md:p-12">
         
         {/* ヘッダー */}
@@ -389,6 +431,21 @@ export default function ReportsPage() {
           </div>
         </section>
       </div>
+
+      <nav className="md:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-black/75 backdrop-blur-xl rounded-[3rem] h-24 flex justify-around items-center px-10 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)] z-50 border border-white/10 ring-1 ring-white/5">
+        <Link href={`/main?customerId=${encodeURIComponent(customerId)}`} className="flex flex-col items-center opacity-30 hover:opacity-100 transition-all group">
+          <span className="text-white text-2xl">●</span>
+          <span className="text-white text-[8px] font-black uppercase italic tracking-widest mt-1">Home</span>
+        </Link>
+        <Link href={`/reports?customerId=${encodeURIComponent(customerId)}`} className="flex flex-col items-center group">
+          <span className="text-[var(--theme-primary)] text-2xl">●</span>
+          <span className="text-[var(--theme-primary)] text-[8px] font-black uppercase italic tracking-widest mt-1">Report</span>
+        </Link>
+        <Link href={`/settings?customerId=${encodeURIComponent(customerId)}`} className="flex flex-col items-center opacity-30 hover:opacity-100 transition-all group">
+          <span className="text-white text-2xl italic font-serif group-active:rotate-12 transition-transform">⚙</span>
+          <span className="text-white text-[8px] font-black uppercase italic tracking-widest mt-1">Setting</span>
+        </Link>
+      </nav>
     </div>
   );
 }

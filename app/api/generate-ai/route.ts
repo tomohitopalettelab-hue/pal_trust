@@ -1,12 +1,35 @@
 import { NextResponse } from "next/server";
 
+type SurveyItem = {
+    id: number | string;
+    text: string;
+    type: string;
+};
+
+type GenerateAiRequestBody = {
+    answers?: Record<string, string | number>;
+    surveyItems?: SurveyItem[];
+    settings?: {
+        aiReviewTaste?: string;
+        aiReviewLength?: string | number;
+    };
+};
+
+type OpenAIResponse = {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string };
+};
+
 export async function POST(req: Request) {
     try {
-        const { answers, surveyItems, settings } = await req.json();
+        const body = (await req.json()) as GenerateAiRequestBody;
+        const answers = body.answers || {};
+        const surveyItems = Array.isArray(body.surveyItems) ? body.surveyItems : [];
+        const settings = body.settings || {};
 
         // 1. 回答内容をテキストにまとめる
-        const context = surveyItems.map((item: any) => {
-            const ans = answers[item.id];
+        const context = surveyItems.map((item) => {
+            const ans = answers[String(item.id)];
             if (!ans) return null;
             return `質問: ${item.text} / 回答: ${ans}${item.type === 'rating' ? '点' : ''}`;
         }).filter(Boolean).join("\n");
@@ -59,7 +82,7 @@ ${context}
             }),
         });
 
-        const data = await response.json();
+        const data = (await response.json()) as OpenAIResponse;
 
         // --- 修正ポイント：エラーハンドリングの強化 ---
         if (!response.ok) {
@@ -71,14 +94,18 @@ ${context}
             throw new Error("AIからの回答が空でした。");
         }
 
-        const aiText = data.choices[0].message.content;
+        const aiText = data.choices?.[0]?.message?.content || '';
+        if (!aiText) {
+            throw new Error('AIからの回答が空でした。');
+        }
         return NextResponse.json({ comment: aiText });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("AI API Error:", error);
+        const message = error instanceof Error ? error.message : '不明なエラー';
         // クライアント側へ具体的なエラー理由を（開発中は特に）返すと原因がすぐわかります
         return NextResponse.json(
-            { comment: `文章の生成に失敗しました (${error.message})` }, 
+            { comment: `文章の生成に失敗しました (${message})` }, 
             { status: 500 }
         );
     }

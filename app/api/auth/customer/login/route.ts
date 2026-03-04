@@ -5,6 +5,7 @@ import { verifyPassword } from '@/lib/password';
 type AccountRow = {
   customer_id: string;
   password_hash: string;
+  is_active: boolean | null;
 };
 
 export async function POST(request: Request) {
@@ -30,8 +31,13 @@ export async function POST(request: Request) {
       ADD COLUMN IF NOT EXISTS customer_name TEXT;
     `;
 
+    await sql`
+      ALTER TABLE customer_accounts
+      ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+    `;
+
     const { rows } = await sql<AccountRow>`
-      SELECT customer_id, password_hash
+      SELECT customer_id, password_hash, is_active
       FROM customer_accounts
       WHERE customer_id = ${String(customerId)}
       LIMIT 1;
@@ -40,6 +46,10 @@ export async function POST(request: Request) {
     const account = rows[0];
     if (!account) {
       return NextResponse.json({ error: 'IDまたはパスワードが正しくありません' }, { status: 401 });
+    }
+
+    if (account.is_active === false) {
+      return NextResponse.json({ error: 'このアカウントは停止中です' }, { status: 403 });
     }
 
     const ok = verifyPassword(String(password), account.password_hash);

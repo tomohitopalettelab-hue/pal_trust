@@ -5,11 +5,56 @@ import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import { THEMES } from '../components/themes';
 import LoadingSpinner from '../components/LoadingSpinner';
+import NoticeToast from '../components/NoticeToast';
+import { useNotice } from '../components/useNotice';
 
 const DEFAULT_SURVEY_ITEMS = [
   { id: 1, text: '接客の満足度はどうでしたか？', type: 'rating' },
   { id: 2, text: '具体的に良かった点や改善点を教えてください', type: 'free' },
 ];
+
+type SurveyItem = {
+  id: number;
+  text: string;
+  type: 'rating' | 'free' | 'choice' | string;
+  options?: string[];
+};
+
+type AppSettings = {
+  themeName?: string;
+  appName?: string;
+  appSubtitle?: string;
+  minStarsForGoogle?: string | number;
+  googleMapUrl?: string;
+  lowRatingMessage?: string;
+};
+
+type AnswerValue = string | number;
+
+const normalizeSurveyItems = (items: unknown): SurveyItem[] => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return DEFAULT_SURVEY_ITEMS;
+  }
+
+  const normalized = items
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const row = item as Record<string, unknown>;
+      return {
+        id: typeof row.id === 'number' ? row.id : Date.now() + index,
+        text: String(row.text || ''),
+        type: String(row.type || 'free'),
+        options: Array.isArray(row.options)
+          ? row.options.map((opt) => String(opt).trim()).filter(Boolean)
+          : [],
+      } as SurveyItem;
+    })
+    .filter((item): item is SurveyItem => Boolean(item));
+
+  return normalized.length > 0 ? normalized : DEFAULT_SURVEY_ITEMS;
+};
 
 export default function SurveyPage() {
   const router = useRouter();
@@ -21,7 +66,7 @@ export default function SurveyPage() {
   // --- 状態管理 ---
   const [step, setStep] = useState(-1);
   const [totalRating, setTotalRating] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, any>>({});
+  const [answers, setAnswers] = useState<Record<number, AnswerValue>>({});
   const [comment, setComment] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
@@ -31,12 +76,15 @@ export default function SurveyPage() {
 
   // DBからの設定データ
   const [loading, setLoading] = useState(true);
-  const [appSettings, setAppSettings] = useState<any>(null);
-  const [surveyItems, setSurveyItems] = useState<any[]>(DEFAULT_SURVEY_ITEMS);
+  const [customerActive, setCustomerActive] = useState<boolean | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [surveyItems, setSurveyItems] = useState<SurveyItem[]>(DEFAULT_SURVEY_ITEMS);
+  const { notice, showNotice, clearNotice } = useNotice();
 
   // --- ここを追加 ---
   // 管理画面の設定(appSettings)にテーマ名があればそれを、なければ standard を使います
-  const theme = THEMES[appSettings?.themeName] || THEMES.standard;
+  const themeKey = appSettings?.themeName || 'standard';
+  const theme = THEMES[themeKey] || THEMES.standard;
   const displayAppName = appSettings?.appName ?? '...';
   const subtitle = String(appSettings?.appSubtitle ?? '...');
   const displayAppSubtitle = subtitle.trim().toUpperCase() === 'SURVEY' ? 'アンケート' : subtitle;
@@ -45,6 +93,36 @@ export default function SurveyPage() {
   // --- DBから設定（アプリ名・質問事項・基準値）を読み込む ---
   useEffect(() => {
     if (!customerId) {
+      return;
+    }
+
+    let isActive = true;
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(`/api/customer-status?customerId=${encodeURIComponent(customerId)}`);
+        const data = await res.json();
+        if (!isActive) return;
+        setCustomerActive(Boolean(data?.exists && data?.isActive));
+      } catch {
+        if (!isActive) return;
+        setCustomerActive(false);
+      }
+    };
+    checkStatus();
+
+    return () => {
+      isActive = false;
+    };
+  }, [customerId]);
+
+  // --- DBから設定（アプリ名・質問事項・基準値）を読み込む ---
+  useEffect(() => {
+    if (!customerId) {
+      setLoading(false);
+      return;
+    }
+
+    if (customerActive !== true) {
       setLoading(false);
       return;
     }
@@ -60,7 +138,7 @@ export default function SurveyPage() {
             setAppSettings(parsed.settings);
           }
           if (Array.isArray(parsed?.surveyItems) && parsed.surveyItems.length > 0) {
-            setSurveyItems(parsed.surveyItems);
+            setSurveyItems(normalizeSurveyItems(parsed.surveyItems));
           } else {
             setSurveyItems(DEFAULT_SURVEY_ITEMS);
           }
@@ -102,13 +180,13 @@ export default function SurveyPage() {
         if (!isActive) return;
         if (data) {
           setAppSettings(data.settings);
-          setSurveyItems(Array.isArray(data.surveyItems) && data.surveyItems.length > 0 ? data.surveyItems : DEFAULT_SURVEY_ITEMS);
+          setSurveyItems(normalizeSurveyItems(data.surveyItems));
           if (typeof window !== 'undefined') {
             window.sessionStorage.setItem(
               cacheKey,
               JSON.stringify({
                 settings: data.settings || null,
-                surveyItems: Array.isArray(data.surveyItems) ? data.surveyItems : DEFAULT_SURVEY_ITEMS,
+                surveyItems: normalizeSurveyItems(data.surveyItems),
               })
             );
           }
@@ -135,14 +213,14 @@ export default function SurveyPage() {
       clearTimeout(safetyLoadingTimeoutId);
       controller.abort();
     };
-  }, [customerId]);
+  }, [customerId, customerActive]);
 
   // --- ハンドラー ---
-  const handleNext = (val: any) => {
-    setSelectedRating(val);
+  const handleNext = (val: AnswerValue) => {
+    setSelectedRating(typeof val === 'number' ? val : null);
 
     // 最初の質問（ステップ0）の回答をメインの満足度とする
-    if (step === 0) {
+    if (step === 0 && typeof val === 'number') {
       setTotalRating(val);
     }
 
@@ -195,9 +273,9 @@ export default function SurveyPage() {
       finalComment = comment;
     } else {
       // 低評価の場合：前のステップ（surveyItems）で入力した「自由回答」を探してセット
-      const freeItem = surveyItems.find(item => item.type === 'free');
+      const freeItem = surveyItems.find((item) => item.type === 'free');
       if (freeItem && answers[freeItem.id]) {
-        finalComment = answers[freeItem.id];
+        finalComment = String(answers[freeItem.id]);
       }
     }
 
@@ -246,8 +324,8 @@ export default function SurveyPage() {
 
       // 3. サンクスページへ移動
       router.push(`/thanks?rating=${totalRating}&customerId=${encodeURIComponent(customerId)}`);
-    } catch (e) {
-      alert("送信に失敗しました");
+    } catch {
+      showNotice('送信に失敗しました', 'error');
     }
   };
 
@@ -284,6 +362,36 @@ export default function SurveyPage() {
     </div>
   );
 
+  const ChoiceOptions = ({ item, onSelect }: { item: SurveyItem; onSelect: (v: string) => void }) => {
+    const options = (item.options || []).filter(Boolean);
+    const selected = String(answers[item.id] || '');
+
+    if (options.length === 0) {
+      return (
+        <div className="bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] rounded-2xl p-5 text-sm font-bold text-[var(--theme-text)]/70">
+          選択肢が設定されていません。管理画面で「選択肢」を追加してください。
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full max-w-md">
+        {options.map((option) => {
+          const isSelected = selected === option;
+          return (
+            <button
+              key={option}
+              onClick={() => onSelect(option)}
+              className={`p-5 rounded-2xl border-3 border-[var(--theme-border)] font-black text-lg transition-all duration-200 active:scale-95 shadow-[6px_6px_0px_var(--theme-border)] ${isSelected ? 'bg-[var(--theme-primary)] text-[var(--theme-on-primary)] translate-x-[2px] translate-y-[2px] shadow-none' : 'bg-[var(--theme-card-bg)] text-[var(--theme-text)]'}`}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   if (!customerId) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
@@ -295,10 +403,28 @@ export default function SurveyPage() {
     );
   }
 
-  if (loading) return <LoadingSpinner />;
+  if (customerActive === false) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
+        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-8 text-center space-y-4">
+          <h1 className="text-2xl font-black italic">この顧客URLは現在停止中です</h1>
+          <p className="text-sm font-bold text-[var(--theme-text)]/70">管理者にお問い合わせください。</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading || customerActive === null) return <LoadingSpinner />;
 
   return (
     <div className={`min-h-screen ${theme.bg} text-[var(--theme-text)] font-sans flex flex-col items-center justify-center p-6 overflow-hidden`}>
+      {notice && (
+        <NoticeToast
+          message={notice.message}
+          variant={notice.variant}
+          onClose={clearNotice}
+        />
+      )}
 
       {step === -1 ? (
         /* --- STEP -1: インパクト抜群のスタート画面 --- */
@@ -365,6 +491,8 @@ export default function SurveyPage() {
 
                 {surveyItems[step].type === "rating" ? (
                   <RatingOptions onSelect={handleNext} />
+                ) : surveyItems[step].type === "choice" ? (
+                  <ChoiceOptions item={surveyItems[step]} onSelect={handleNext} />
                 ) : (
                   <div className="space-y-6">
                     <textarea

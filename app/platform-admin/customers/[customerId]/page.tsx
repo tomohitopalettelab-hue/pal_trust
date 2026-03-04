@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import LoadingSpinner from '../../../components/LoadingSpinner';
+import NoticeToast from '../../../components/NoticeToast';
+import { useNotice } from '../../../components/useNotice';
 
 type SurveyItem = {
   id: number;
@@ -45,6 +47,7 @@ export default function CustomerDetailPage() {
   const [editMainPagePath, setEditMainPagePath] = useState('');
   const [editSettings, setEditSettings] = useState<Record<string, unknown>>({});
   const [editSurveyItems, setEditSurveyItems] = useState<SurveyItem[]>([]);
+  const { notice, showNotice, clearNotice } = useNotice();
 
   const customerId = useMemo(() => {
     const raw = params?.customerId;
@@ -105,6 +108,8 @@ export default function CustomerDetailPage() {
   const appName = String(currentSettings.appName || detail?.customerName || '未設定');
   const themeName = String(currentSettings.themeName || 'standard');
   const minStars = String(currentSettings.minStarsForGoogle || '4');
+  const adminGoogleMapUrl = String(currentSettings.adminGoogleMapUrl || 'https://business.google.com/');
+  const surveyGoogleMapUrl = String(currentSettings.googleMapUrl || '');
   const mainPath = detail?.mainPagePath || `/main?customerId=${encodeURIComponent(customerId)}`;
   const surveyPath = `/survey?customerId=${encodeURIComponent(customerId)}`;
   const mainUrl = `${baseUrl}${mainPath}`;
@@ -139,9 +144,9 @@ export default function CustomerDetailPage() {
       setEditSettings(reloadData.settings || {});
       setEditSurveyItems(Array.isArray(reloadData.surveyItems) ? reloadData.surveyItems : []);
       setIsEditing(false);
-      alert('顧客詳細を保存しました');
+      showNotice('顧客詳細を保存しました');
     } catch (error) {
-      alert(error instanceof Error ? error.message : '保存に失敗しました');
+      showNotice(error instanceof Error ? error.message : '保存に失敗しました', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -161,6 +166,13 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="min-h-screen bg-[var(--theme-bg)] text-[var(--theme-text)] p-6 md:p-10 font-sans">
+      {notice && (
+        <NoticeToast
+          message={notice.message}
+          variant={notice.variant}
+          onClose={clearNotice}
+        />
+      )}
       <div className="max-w-4xl mx-auto space-y-6">
         <header className="flex items-center justify-between gap-4">
           <div>
@@ -253,7 +265,27 @@ export default function CustomerDetailPage() {
                 className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 disabled:opacity-70"
               />
             </label>
-            <p>設定更新: {detail?.settingsUpdatedAt ? new Date(detail.settingsUpdatedAt).toLocaleString('ja-JP') : '-'}</p>
+            <label className="space-y-1 md:col-span-2">
+              <span className="text-[11px] text-[var(--theme-text)]/70">admin GoogleMap URL</span>
+              <input
+                value={String(isEditing ? editSettings.adminGoogleMapUrl || '' : adminGoogleMapUrl)}
+                onChange={(e) => setEditSettings((prev) => ({ ...prev, adminGoogleMapUrl: e.target.value }))}
+                disabled={!isEditing}
+                placeholder="https://business.google.com/"
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 disabled:opacity-70"
+              />
+            </label>
+            <label className="space-y-1 md:col-span-2">
+              <span className="text-[11px] text-[var(--theme-text)]/70">誘導先 Google Map URL（survey）</span>
+              <input
+                value={String(isEditing ? editSettings.googleMapUrl || '' : surveyGoogleMapUrl)}
+                onChange={(e) => setEditSettings((prev) => ({ ...prev, googleMapUrl: e.target.value }))}
+                disabled={!isEditing}
+                placeholder="https://goo.gl/maps/..."
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 disabled:opacity-70"
+              />
+            </label>
+            <p className="md:col-span-2">設定更新: {detail?.settingsUpdatedAt ? new Date(detail.settingsUpdatedAt).toLocaleString('ja-JP') : '-'}</p>
           </div>
           <label className="block text-sm font-black text-[var(--theme-text)]/80 space-y-1">
             <span className="text-[11px] text-[var(--theme-text)]/70">高評価メッセージ</span>
@@ -307,6 +339,7 @@ export default function CustomerDetailPage() {
                     >
                       <option value="rating">rating</option>
                       <option value="free">free</option>
+                      <option value="choice">choice</option>
                     </select>
                     {isEditing && (
                       <button

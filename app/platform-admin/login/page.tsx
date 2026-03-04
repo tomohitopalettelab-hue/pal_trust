@@ -3,14 +3,18 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import NoticeToast from '../../components/NoticeToast';
+import { useNotice } from '../../components/useNotice';
 
 export default function PlatformAdminLoginPage() {
   const router = useRouter();
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const { notice, showNotice, clearNotice } = useNotice();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    clearNotice();
     setLoading(true);
 
     try {
@@ -28,7 +32,7 @@ export default function PlatformAdminLoginPage() {
       localStorage.setItem('platformAdminLoggedIn', 'true');
       router.push('/platform-admin');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'ログインに失敗しました');
+      showNotice(error instanceof Error ? error.message : 'ログインに失敗しました', 'error');
     } finally {
       setLoading(false);
     }
@@ -36,6 +40,7 @@ export default function PlatformAdminLoginPage() {
 
   return (
     <div className="min-h-screen bg-[var(--theme-bg)] flex items-center justify-center p-6 font-sans">
+      {notice && <NoticeToast message={notice.message} variant={notice.variant} onClose={clearNotice} />}
       <div className="max-w-md w-full animate-in fade-in zoom-in-95 duration-700">
         <div className="text-center mb-10">
           <h1 className="text-5xl font-black italic tracking-tighter uppercase leading-none text-[var(--theme-text)]">

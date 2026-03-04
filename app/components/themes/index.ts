@@ -1,4 +1,17 @@
-export const THEMES: { [key: string]: any } = {
+export type ThemeDefinition = {
+  id: string;
+  name: string;
+  bg: string;
+  card: string;
+  accentBg: string;
+  accentText: string;
+  text: string;
+  input: string;
+  button: string;
+  subButton: string;
+};
+
+export const THEMES: Record<string, ThemeDefinition> = {
   // 1. 標準：ストリート・インパクト
   standard: {
     id: "standard",

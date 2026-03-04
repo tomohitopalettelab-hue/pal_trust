@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     `;
 
     return NextResponse.json(rows[0]?.data || null);
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: '取得失敗' }, { status: 500 });
   }
 }
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     `;
 
     return NextResponse.json({ message: '保存成功' });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: '保存失敗' }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ type ListRow = {
   customer_id: string;
   customer_name: string | null;
   main_page_path: string | null;
+  is_active: boolean | null;
   has_password: boolean;
   survey_count: number;
   avg_rating: string | number | null;
@@ -35,6 +36,11 @@ async function ensureTables() {
   await sql`
     ALTER TABLE customer_accounts
     ADD COLUMN IF NOT EXISTS main_page_path TEXT;
+  `;
+
+  await sql`
+    ALTER TABLE customer_accounts
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
   `;
 
   await sql`
@@ -71,6 +77,7 @@ export async function GET() {
         ids.customer_id,
         accounts.customer_name,
         accounts.main_page_path,
+        accounts.is_active,
         (accounts.password_hash IS NOT NULL) AS has_password,
         COALESCE(agg.survey_count, 0)::int AS survey_count,
         agg.avg_rating,
@@ -93,6 +100,7 @@ export async function GET() {
         customerId: row.customer_id,
         customerName: row.customer_name || '',
         mainPagePath: row.main_page_path || `/main?customerId=${encodeURIComponent(row.customer_id)}`,
+        isActive: row.is_active !== false,
         hasPassword: Boolean(row.has_password),
         surveyCount: Number(row.survey_count || 0),
         averageRating: row.avg_rating === null ? 0 : Number(row.avg_rating),

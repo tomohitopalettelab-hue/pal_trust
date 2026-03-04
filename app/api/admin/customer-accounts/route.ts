@@ -6,6 +6,7 @@ type AccountRow = {
   customer_id: string;
   customer_name: string | null;
   main_page_path: string | null;
+  is_active: boolean | null;
   created_at: string;
   updated_at: string;
 };
@@ -63,10 +64,24 @@ async function ensureTable() {
   `;
 
   await sql`
+    ALTER TABLE customer_accounts
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+  `;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS customer_app_settings (
       customer_id TEXT PRIMARY KEY,
       data JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS survey_funnel_events (
+      session_id TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL,
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      review_clicked_at TIMESTAMPTZ
     );
   `;
 }
@@ -75,7 +90,7 @@ export async function GET() {
   try {
     await ensureTable();
     const { rows } = await sql<AccountRow>`
-      SELECT customer_id, customer_name, main_page_path, created_at::text, updated_at::text
+      SELECT customer_id, customer_name, main_page_path, is_active, created_at::text, updated_at::text
       FROM customer_accounts
       ORDER BY updated_at DESC;
     `;
@@ -84,6 +99,7 @@ export async function GET() {
       customerId: row.customer_id,
       customerName: row.customer_name || '',
       mainPagePath: row.main_page_path || `/main?customerId=${encodeURIComponent(row.customer_id)}`,
+      isActive: row.is_active !== false,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     })));
@@ -138,6 +154,31 @@ export async function POST(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const customerId = String(body?.customerId || '').trim();
+    const isActive = body?.isActive;
+
+    if (!customerId || typeof isActive !== 'boolean') {
+      return NextResponse.json({ error: 'customerIdとisActiveは必須です' }, { status: 400 });
+    }
+
+    await ensureTable();
+
+    await sql`
+      UPDATE customer_accounts
+      SET is_active = ${isActive}, updated_at = NOW()
+      WHERE customer_id = ${customerId};
+    `;
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('customer accounts patch error:', error);
+    return NextResponse.json({ error: '更新に失敗しました' }, { status: 500 });
+  }
+}
+
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -149,10 +190,10 @@ export async function DELETE(request: Request) {
 
     await ensureTable();
 
-    await sql`
-      DELETE FROM customer_accounts
-      WHERE customer_id = ${customerId};
-    `;
+    await sql`DELETE FROM customer_accounts WHERE customer_id = ${customerId};`;
+    await sql`DELETE FROM customer_app_settings WHERE customer_id = ${customerId};`;
+    await sql`DELETE FROM surveys WHERE COALESCE(NULLIF(category, ''), 'default') = ${customerId};`;
+    await sql`DELETE FROM survey_funnel_events WHERE customer_id = ${customerId};`;
 
     return NextResponse.json({ ok: true });
   } catch (error) {
