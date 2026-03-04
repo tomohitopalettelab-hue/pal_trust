@@ -7,6 +7,8 @@ type ListRow = {
   main_page_path: string | null;
   is_active: boolean | null;
   has_password: boolean;
+  created_at: string | null;
+  updated_at: string | null;
   survey_count: number;
   avg_rating: string | number | null;
   last_response_at: string | null;
@@ -79,6 +81,8 @@ export async function GET() {
         accounts.main_page_path,
         accounts.is_active,
         (accounts.password_hash IS NOT NULL) AS has_password,
+        accounts.created_at::text AS created_at,
+        accounts.updated_at::text AS updated_at,
         COALESCE(agg.survey_count, 0)::int AS survey_count,
         agg.avg_rating,
         agg.last_response_at,
@@ -87,7 +91,7 @@ export async function GET() {
       LEFT JOIN customer_accounts accounts ON accounts.customer_id = ids.customer_id
       LEFT JOIN customer_app_settings settings ON settings.customer_id = ids.customer_id
       LEFT JOIN surveys_agg agg ON agg.customer_id = ids.customer_id
-      ORDER BY ids.customer_id ASC;
+      ORDER BY accounts.created_at DESC NULLS LAST, accounts.updated_at DESC NULLS LAST, ids.customer_id ASC;
     `;
 
     const normalized = rows.map((row) => {
@@ -102,6 +106,8 @@ export async function GET() {
         mainPagePath: row.main_page_path || `/main?customerId=${encodeURIComponent(row.customer_id)}`,
         isActive: row.is_active !== false,
         hasPassword: Boolean(row.has_password),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
         surveyCount: Number(row.survey_count || 0),
         averageRating: row.avg_rating === null ? 0 : Number(row.avg_rating),
         lastResponseAt: row.last_response_at,

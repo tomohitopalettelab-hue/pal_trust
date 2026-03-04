@@ -14,6 +14,8 @@ type CustomerListItem = {
   mainPagePath: string;
   isActive: boolean;
   hasPassword: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
   surveyCount: number;
   averageRating: number;
   lastResponseAt: string | null;
@@ -83,14 +85,41 @@ export default function PlatformAdminPage() {
 
   const filteredCustomerList = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
-    if (!keyword) return customerList;
-
-    return customerList.filter((item) => {
+    const source = keyword
+      ? customerList.filter((item) => {
       const idMatch = item.customerId.toLowerCase().includes(keyword);
       const nameMatch = (item.customerName || '').toLowerCase().includes(keyword);
       return idMatch || nameMatch;
+    })
+      : customerList;
+
+    return [...source].sort((a, b) => {
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (bCreated !== aCreated) {
+        return bCreated - aCreated;
+      }
+      const aUpdated = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bUpdated = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      if (bUpdated !== aUpdated) {
+        return bUpdated - aUpdated;
+      }
+      return a.customerId.localeCompare(b.customerId);
     });
   }, [customerList, searchKeyword]);
+
+  const formatDateTime = (value: string | null) => {
+    if (!value) return '未記録';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '未記録';
+    return date.toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
   const refreshCustomerList = async () => {
     const res = await fetch('/api/admin/customers-list');
@@ -309,6 +338,8 @@ export default function PlatformAdminPage() {
                       <p>Google誘導基準: ★{mapRule}以上</p>
                       <p>アプリ表示名: {appName}</p>
                       <p>回答数: {item.surveyCount} / 平均: {item.averageRating.toFixed(2)}</p>
+                      <p>登録日時: {formatDateTime(item.createdAt)}</p>
+                      <p>最終更新日時: {formatDateTime(item.updatedAt)}</p>
                     </div>
 
                     <div className="text-[11px] font-black text-[var(--theme-text)]/70">
