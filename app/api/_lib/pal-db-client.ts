@@ -1,5 +1,9 @@
 export const getPalDbBaseUrl = (): string => {
-  return process.env.PAL_DB_BASE_URL?.trim() || 'http://localhost:3100';
+  const configured = process.env.PAL_DB_BASE_URL?.trim();
+  if (configured) return configured;
+  return process.env.NODE_ENV === 'production'
+    ? 'https://pal-db.onrender.com'
+    : 'http://localhost:3100';
 };
 
 export const buildPalDbUrl = (path: string): string => {
