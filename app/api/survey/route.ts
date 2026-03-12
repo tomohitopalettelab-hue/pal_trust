@@ -1,16 +1,10 @@
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
-
-async function ensureSurveyColumns() {
-  await sql`
-    ALTER TABLE surveys
-    ADD COLUMN IF NOT EXISTS all_answers JSONB;
-  `;
-}
+import { ensureSurveysTable } from '@/app/api/_lib/ensure-surveys-table';
 
 export async function POST(request: Request) {
   try {
-    await ensureSurveyColumns();
+    await ensureSurveysTable();
 
     const { rating, category, comment, customerId, all_answers } = await request.json();
     const resolvedCustomerId = (customerId || category || 'default').toString();

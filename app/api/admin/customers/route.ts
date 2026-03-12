@@ -1,5 +1,6 @@
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
+import { ensureSurveysTable } from '@/app/api/_lib/ensure-surveys-table';
 
 type CustomerSummaryRow = {
   customer_id: string;
@@ -10,6 +11,7 @@ type CustomerSummaryRow = {
 
 export async function GET() {
   try {
+    await ensureSurveysTable();
     const { rows } = await sql<CustomerSummaryRow>`
       SELECT
         COALESCE(NULLIF(category, ''), 'default') AS customer_id,

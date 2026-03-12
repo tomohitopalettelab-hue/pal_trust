@@ -2,6 +2,7 @@ import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
 import { findTrustAccountByCustomerId } from '@/app/api/_lib/pal-trust-accounts';
 import { palDbPost } from '@/app/api/_lib/pal-db-client';
+import { ensureSurveysTable } from '@/app/api/_lib/ensure-surveys-table';
 
 type AccountRow = {
   customer_id: string;
@@ -60,6 +61,8 @@ async function ensureTables() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+
+  await ensureSurveysTable();
 }
 
 export async function GET(

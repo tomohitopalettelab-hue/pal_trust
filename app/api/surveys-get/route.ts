@@ -1,8 +1,10 @@
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
+import { ensureSurveysTable } from '@/app/api/_lib/ensure-surveys-table';
 
 export async function GET(request: Request) {
   try {
+    await ensureSurveysTable();
     const { searchParams } = new URL(request.url);
     const customerId = searchParams.get('customerId');
 
