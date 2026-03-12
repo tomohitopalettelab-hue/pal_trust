@@ -175,8 +175,8 @@ export async function PATCH(
     const mainPagePath = mainPagePathRaw || `/main?customerId=${encodeURIComponent(customerId)}`;
 
     await sql`
-      INSERT INTO customer_accounts (customer_id, customer_name, main_page_path, updated_at)
-      VALUES (${customerId}, ${customerName || trustAccount.name || ''}, ${mainPagePath}, NOW())
+      INSERT INTO customer_accounts (customer_id, customer_name, main_page_path, password_hash, updated_at)
+      VALUES (${customerId}, ${customerName || trustAccount.name || ''}, ${mainPagePath}, ${''}, NOW())
       ON CONFLICT (customer_id)
       DO UPDATE SET
         customer_name = EXCLUDED.customer_name,
