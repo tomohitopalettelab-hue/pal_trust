@@ -313,23 +313,24 @@ function SurveyPageContent() {
 
       // 2. 高評価ならコピー ＆ マップ遷移
       if (isHighRating) {
-        // window.openはユーザー操作の同期タイミングで呼ばないとポップアップブロックされる
-        const googleWindow = appSettings?.googleMapUrl
-          ? window.open(appSettings.googleMapUrl, '_blank')
-          : null;
+        // clipboard APIはページにフォーカスがないと失敗するのでwindow.openより先に実行
         if (comment) {
           try {
             await navigator.clipboard.writeText(comment);
-            showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success', 5000);
           } catch (err) {
             console.error('コピーに失敗しました', err);
           }
         }
-        // トーストが見えるように少し待ってからサンクスページへ
+        showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success', 5000);
+        // トーストを見せてからGoogleマップへ遷移（同じタブで遷移しポップアップブロックを回避）
         await new Promise(resolve => setTimeout(resolve, 2000));
+        if (appSettings?.googleMapUrl) {
+          window.location.href = appSettings.googleMapUrl;
+        }
+        return;
       }
 
-      // 3. サンクスページへ移動
+      // 3. 低評価の場合のみサンクスページへ移動
       router.push(`/thanks?rating=${totalRating}&customerId=${encodeURIComponent(customerId)}`);
     } catch {
       showNotice('送信に失敗しました', 'error');
