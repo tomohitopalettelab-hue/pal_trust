@@ -265,6 +265,16 @@ export default function CustomerDetailPage() {
                 className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 disabled:opacity-70"
               />
             </label>
+            <label className="space-y-1">
+              <span className="text-[11px] text-[var(--theme-text)]/70">業種</span>
+              <input
+                value={String(isEditing ? editSettings.industry || '' : currentSettings.industry || '')}
+                onChange={(e) => setEditSettings((prev) => ({ ...prev, industry: e.target.value }))}
+                disabled={!isEditing}
+                placeholder="例: 美容院、飲食店、整体院"
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 disabled:opacity-70"
+              />
+            </label>
             <label className="space-y-1 md:col-span-2">
               <span className="text-[11px] text-[var(--theme-text)]/70">admin GoogleMap URL</span>
               <input

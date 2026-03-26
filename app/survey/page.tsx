@@ -29,6 +29,7 @@ type AppSettings = {
   minStarsForGoogle?: string | number;
   googleMapUrl?: string;
   lowRatingMessage?: string;
+  industry?: string;
 };
 
 type AnswerValue = string | number;

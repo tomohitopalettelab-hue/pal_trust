@@ -12,6 +12,7 @@ type GenerateAiRequestBody = {
     settings?: {
         aiReviewTaste?: string;
         aiReviewLength?: string | number;
+        industry?: string;
     };
 };
 
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
 ・禁止: AIが書いたとバレるような定型文（「素晴らしい体験でした」「心温まるサービス」の多用など）は避け、人間味のある文章にしてください。
 ・禁止: 全ての回答を均等に取り上げる必要はありません。特に印象に残った点を中心に書いてください。
 
-【アンケート回答】
+${settings?.industry ? `【店舗の業種】\n${settings.industry}\n※この業種に合った自然な表現・用語を使ってください。\n` : ''}【アンケート回答】
 ${context}
 
 【出力ルール】
