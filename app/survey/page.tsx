@@ -314,9 +314,9 @@ function SurveyPageContent() {
       // 2. 高評価ならコピー ＆ マップ遷移
       if (isHighRating) {
         // window.openはユーザー操作の同期タイミングで呼ばないとポップアップブロックされる
-        if (appSettings?.googleMapUrl) {
-          window.open(appSettings.googleMapUrl, '_blank');
-        }
+        const googleWindow = appSettings?.googleMapUrl
+          ? window.open(appSettings.googleMapUrl, '_blank')
+          : null;
         if (comment) {
           try {
             await navigator.clipboard.writeText(comment);
@@ -325,6 +325,8 @@ function SurveyPageContent() {
             console.error('コピーに失敗しました', err);
           }
         }
+        // トーストが見えるように少し待ってからサンクスページへ
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       // 3. サンクスページへ移動
