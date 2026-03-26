@@ -313,6 +313,10 @@ function SurveyPageContent() {
 
       // 2. 高評価ならコピー ＆ マップ遷移
       if (isHighRating) {
+        // window.openはユーザー操作の同期タイミングで呼ばないとポップアップブロックされる
+        if (appSettings?.googleMapUrl) {
+          window.open(appSettings.googleMapUrl, '_blank');
+        }
         if (comment) {
           try {
             await navigator.clipboard.writeText(comment);
@@ -320,11 +324,6 @@ function SurveyPageContent() {
           } catch (err) {
             console.error('コピーに失敗しました', err);
           }
-        }
-        // トーストが見えるように少し待ってからGoogleマップを開く
-        await new Promise(resolve => setTimeout(resolve, 800));
-        if (appSettings?.googleMapUrl) {
-          window.open(appSettings.googleMapUrl, '_blank');
         }
       }
 
