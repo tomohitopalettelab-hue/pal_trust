@@ -315,10 +315,13 @@ function SurveyPageContent() {
         if (comment) {
           try {
             await navigator.clipboard.writeText(comment);
+            showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success');
           } catch (err) {
             console.error('コピーに失敗しました', err);
           }
         }
+        // トーストが見えるように少し待ってからGoogleマップを開く
+        await new Promise(resolve => setTimeout(resolve, 800));
         if (appSettings?.googleMapUrl) {
           window.open(appSettings.googleMapUrl, '_blank');
         }
