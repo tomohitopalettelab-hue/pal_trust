@@ -36,16 +36,16 @@ export async function POST(req: Request) {
 
         // --- 2. テイストに応じた具体的な指示 ---
         const tasteMap: Record<string, string> = {
-            friendly: "親しみやすく、話し言葉を交えた自然な口調（〜だよ、〜でした！など）",
+            friendly: "親しみやすく柔らかい敬語（〜でした！、〜ですね、〜してもらえました！など。ため口は禁止）",
             polite: "丁寧で誠実な、しっかりした敬語（〜でございます、感謝しております等）",
-            energetic: "元気いっぱいでポジティブな、ワクワク感が伝わる口調（！を多用し、最高！という雰囲気に）",
-            emotional: "感動が伝わるような、心温まるエモーショナルな表現（感動しました、心に残りました等）",
-            minimal: "余計な装飾を省き、短く端的に良さを伝える口調（〜で良かった。また行きます。等）",
+            energetic: "元気でポジティブな敬語（！を多用しつつも「〜でした！」「〜です！」など丁寧語を維持。ため口は禁止）",
+            emotional: "感動が伝わるような心温まる敬語（感動しました、心に残りました等）",
+            minimal: "短く端的に良さを伝える敬語（〜でした。また伺います。等。ため口は禁止）",
         };
 
         let selectedTasteInstruction = "";
         if (settings?.aiReviewTaste === "random") {
-            selectedTasteInstruction = "以下の5つのテイストから、今回の回答内容に最も合うものを1つAIが選び、その口調で作成してください：[親しみやすい, 丁寧, 元気, 感動的, シンプル]";
+            selectedTasteInstruction = "以下の5つのテイストから、今回の回答内容に最も合うものを1つAIが選び、その口調で作成してください：[親しみやすい, 丁寧, 元気, 感動的, シンプル]（※どのテイストでも必ず敬語を使うこと）";
         } else {
             const selectedTasteKey = settings?.aiReviewTaste;
             selectedTasteInstruction = selectedTasteKey && selectedTasteKey in tasteMap
@@ -63,6 +63,7 @@ export async function POST(req: Request) {
 ・「〜してもらいました」「〜していただきました」「〜に行きました」など、お客様が体験を語る表現を使うこと。
 ・「お客様に〜」「ご来店いただき〜」「当店では〜」などお店側の表現は絶対に使わないこと。
 ・「おすすめです」「また行きたいです」など、他の人に薦める・自分がまた行きたいという気持ちを自然に含めてOK。
+・【敬語必須】どのテイストであっても、必ず敬語（です・ます調）で書くこと。「〜だよ」「〜だった」「〜してくれた」などのため口は絶対に使わないこと。
 
 【制約事項】
 ・口調: ${selectedTasteInstruction}

@@ -315,7 +315,7 @@ function SurveyPageContent() {
         if (comment) {
           try {
             await navigator.clipboard.writeText(comment);
-            showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success');
+            showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success', 5000);
           } catch (err) {
             console.error('コピーに失敗しました', err);
           }
