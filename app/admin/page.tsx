@@ -4,6 +4,7 @@ import React, { Suspense, useState, useEffect, useRef } from 'react'; // useEffe
 import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { MessageSquareReply, Share2, ToggleLeft, ToggleRight, Loader2 } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import NoticeToast from '../components/NoticeToast';
 import { useNotice } from '../components/useNotice';
@@ -49,6 +50,13 @@ function OwnerDashboardContent() {
   const [qrColorHex, setQrColorHex] = useState('000000');
   const [isDownloadingQr, setIsDownloadingQr] = useState(false);
   const { notice, showNotice, clearNotice } = useNotice();
+
+  // --- pal_opt連携状態 ---
+  const [hasPalOpt, setHasPalOpt] = useState(false);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [autoReplyStyle, setAutoReplyStyle] = useState<'professional' | 'friendly' | 'energetic'>('professional');
+  const [isTogglingAutoReply, setIsTogglingAutoReply] = useState(false);
+  const [isSnsPosting, setIsSnsPosting] = useState(false);
 
   useEffect(() => {
     const loggedIn = localStorage.getItem('customerLoggedIn') === 'true';
@@ -125,6 +133,36 @@ function OwnerDashboardContent() {
       isMounted = false;
     };
   }, [authChecking, customerId]);
+
+  // --- pal_opt サービス確認 ---
+  useEffect(() => {
+    if (authChecking || !customerId || customerActive !== true) return;
+    let isMounted = true;
+    const checkPalOpt = async () => {
+      try {
+        const res = await fetch(`/api/gbp-reviews?paletteId=${encodeURIComponent(customerId)}&check=true`);
+        if (!isMounted) return;
+        if (res.ok) {
+          setHasPalOpt(true);
+          // 自動返信の現在の状態も取得
+          try {
+            const statusRes = await fetch(`/api/gbp-reviews/auto-reply-status?paletteId=${encodeURIComponent(customerId)}`);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              setAutoReplyEnabled(Boolean(statusData?.enabled));
+              if (statusData?.style) setAutoReplyStyle(statusData.style);
+            }
+          } catch { /* ignore */ }
+        } else {
+          setHasPalOpt(false);
+        }
+      } catch {
+        if (isMounted) setHasPalOpt(false);
+      }
+    };
+    checkPalOpt();
+    return () => { isMounted = false; };
+  }, [authChecking, customerId, customerActive]);
 
   useEffect(() => {
     if (authChecking) {
@@ -216,6 +254,76 @@ function OwnerDashboardContent() {
     };
     fetchData();
   }, [customerId, authChecking, customerActive]);
+
+  // --- pal_opt: 口コミ自動返信トグル ---
+  const handleToggleAutoReply = async () => {
+    setIsTogglingAutoReply(true);
+    try {
+      const res = await fetch('/api/gbp-reviews/auto-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paletteId: customerId,
+          enabled: !autoReplyEnabled,
+          style: autoReplyStyle,
+        }),
+      });
+      if (res.ok) {
+        setAutoReplyEnabled(!autoReplyEnabled);
+        showNotice(autoReplyEnabled ? '口コミ自動返信をOFFにしました' : '口コミ自動返信をONにしました');
+      } else {
+        showNotice('自動返信の切り替えに失敗しました', 'error');
+      }
+    } catch {
+      showNotice('通信エラーが発生しました', 'error');
+    } finally {
+      setIsTogglingAutoReply(false);
+    }
+  };
+
+  const handleChangeAutoReplyStyle = async (style: 'professional' | 'friendly' | 'energetic') => {
+    setAutoReplyStyle(style);
+    try {
+      await fetch('/api/gbp-reviews/auto-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paletteId: customerId,
+          enabled: autoReplyEnabled,
+          style,
+        }),
+      });
+      showNotice('返信スタイルを変更しました');
+    } catch {
+      showNotice('スタイル変更に失敗しました', 'error');
+    }
+  };
+
+  // --- pal_opt: 口コミをSNSに投稿 ---
+  const handlePostToSns = async () => {
+    if (!latestFeedback) return;
+    setIsSnsPosting(true);
+    try {
+      const res = await fetch('/api/review-to-sns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paletteId: customerId,
+          rating: latestFeedback.rating,
+          comment: latestFeedback.comment || '',
+        }),
+      });
+      if (res.ok) {
+        showNotice('pal_opt にSNS投稿が作成されました。pal_opt で確認・投稿してください。');
+      } else {
+        showNotice('SNS投稿の作成に失敗しました', 'error');
+      }
+    } catch {
+      showNotice('通信エラーが発生しました', 'error');
+    } finally {
+      setIsSnsPosting(false);
+    }
+  };
 
   const copyToClipboard = () => {
     const surveyUrl = `${window.location.origin}/survey?customerId=${encodeURIComponent(customerId)}`;
@@ -457,6 +565,61 @@ function OwnerDashboardContent() {
               </a>
             </div>
 
+            {/* --- pal_opt 口コミ自動返信セクション --- */}
+            {hasPalOpt && (
+              <section className="bg-[var(--theme-card-bg)] rounded-[3rem] border-[3px] border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
+                <div className="flex items-center gap-3 mb-6">
+                  <MessageSquareReply size={20} className="text-[var(--theme-primary)]" />
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] italic">口コミ自動返信</h3>
+                </div>
+
+                {/* トグルスイッチ */}
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <p className="text-sm font-black text-[var(--theme-text)] italic">自動返信</p>
+                    <p className="text-[10px] font-bold text-[var(--theme-text)]/50">Googleの口コミに自動で返信します</p>
+                  </div>
+                  <button
+                    onClick={handleToggleAutoReply}
+                    disabled={isTogglingAutoReply}
+                    className="flex items-center gap-2 transition-all"
+                  >
+                    {isTogglingAutoReply ? (
+                      <Loader2 size={24} className="animate-spin text-[var(--theme-primary)]" />
+                    ) : autoReplyEnabled ? (
+                      <ToggleRight size={36} className="text-[var(--theme-primary)]" />
+                    ) : (
+                      <ToggleLeft size={36} className="text-[var(--theme-text)]/30" />
+                    )}
+                  </button>
+                </div>
+
+                {/* 返信スタイル選択 */}
+                <div>
+                  <p className="text-[10px] font-black text-[var(--theme-text)]/60 uppercase tracking-widest mb-3">返信スタイル</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { value: 'professional' as const, label: '丁寧' },
+                      { value: 'friendly' as const, label: 'フレンドリー' },
+                      { value: 'energetic' as const, label: '元気' },
+                    ]).map((style) => (
+                      <button
+                        key={style.value}
+                        onClick={() => handleChangeAutoReplyStyle(style.value)}
+                        className={`py-3 rounded-2xl text-xs font-black italic border-[2px] transition-all ${
+                          autoReplyStyle === style.value
+                            ? 'bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-[var(--theme-border)] shadow-[4px_4px_0px_var(--theme-border)]'
+                            : 'bg-[var(--theme-card-bg)] text-[var(--theme-text)]/60 border-[var(--theme-border)]/30'
+                        }`}
+                      >
+                        {style.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+
             <section>
               <div className="flex justify-between items-end mb-6 px-2">
                 <h3 className="text-xs font-black uppercase tracking-[0.3em] italic border-b-[3px] border-[var(--theme-primary)] pb-1">Latest Feedback</h3>
@@ -489,6 +652,21 @@ function OwnerDashboardContent() {
                        </div>
                        <span className="text-3xl font-black italic leading-none">{latestFeedback.rating.toFixed(1)}</span>
                     </div>
+                    {/* pal_opt: SNSに投稿ボタン */}
+                    {hasPalOpt && (
+                      <button
+                        onClick={handlePostToSns}
+                        disabled={isSnsPosting}
+                        className="mt-6 w-full flex items-center justify-center gap-2 py-4 rounded-2xl border-[2px] border-[var(--theme-border)] bg-[var(--theme-primary)] text-[var(--theme-on-primary)] font-black text-xs italic shadow-[4px_4px_0px_var(--theme-border)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-50"
+                      >
+                        {isSnsPosting ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Share2 size={14} />
+                        )}
+                        {isSnsPosting ? '投稿作成中...' : 'SNSに投稿'}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <p className="text-xs font-black text-[var(--theme-text)] opacity-40 italic text-center py-4">まだ回答がありません</p>
