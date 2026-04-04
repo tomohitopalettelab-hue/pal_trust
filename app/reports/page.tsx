@@ -314,19 +314,23 @@ function ReportsPageContent() {
             <p className="text-[11px] font-black text-[var(--theme-text)]/70">MAX: {monthlyMax}件</p>
           </div>
           <div className="h-48 md:h-64 flex items-end justify-between gap-2 md:gap-8">
-            {(monthlyData.length > 0 ? monthlyData : [{ month: 'データなし', count: 0 }]).map((data, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-4 group">
-                <div 
-                  className={`w-full rounded-t-xl border-t-2 border-x-2 border-[var(--theme-border)] transition-all duration-700`}
-                  style={{ 
-                    height: `${Math.max(4, (data.count / monthlyMax) * 100)}%`,
-                    backgroundColor: i === (monthlyData.length > 0 ? monthlyData.length - 1 : 0) ? 'var(--theme-primary)' : 'var(--theme-text)',
-                    opacity: i === (monthlyData.length > 0 ? monthlyData.length - 1 : 0) ? 1 : 0.12
-                  }}
-                ></div>
-                <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 italic uppercase">{data.month}</span>
-              </div>
-            ))}
+            {(monthlyData.length > 0 ? monthlyData : [{ month: 'データなし', count: 0 }]).map((data, i) => {
+              const isLatest = i === (monthlyData.length > 0 ? monthlyData.length - 1 : 0);
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
+                  <span className="text-[12px] font-black" style={{ color: 'var(--theme-text)', opacity: isLatest ? 1 : 0.5 }}>{data.count}件</span>
+                  <div
+                    className={`w-full rounded-t-xl border-t-2 border-x-2 border-[var(--theme-border)] transition-all duration-700`}
+                    style={{
+                      height: `${Math.max(8, (data.count / monthlyMax) * 100)}%`,
+                      backgroundColor: isLatest ? 'var(--theme-primary)' : 'var(--theme-text)',
+                      opacity: isLatest ? 1 : 0.25
+                    }}
+                  ></div>
+                  <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 italic uppercase">{data.month}</span>
+                </div>
+              );
+            })}
           </div>
         </section>
 
