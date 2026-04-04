@@ -313,16 +313,17 @@ function ReportsPageContent() {
             <h3 className="text-sm font-black uppercase tracking-widest italic border-b-4 border-[var(--theme-primary)] inline-block">月別回答数の推移</h3>
             <p className="text-[11px] font-black text-[var(--theme-text)]/70">MAX: {monthlyMax}件</p>
           </div>
-          <div className="h-48 md:h-64 flex items-end justify-between gap-2 md:gap-8">
+          <div className="flex justify-between gap-2 md:gap-8">
             {(monthlyData.length > 0 ? monthlyData : [{ month: 'データなし', count: 0 }]).map((data, i) => {
               const isLatest = i === (monthlyData.length > 0 ? monthlyData.length - 1 : 0);
+              const barHeight = Math.max(12, (data.count / monthlyMax) * 200);
               return (
                 <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
                   <span className="text-[12px] font-black" style={{ color: 'var(--theme-text)', opacity: isLatest ? 1 : 0.5 }}>{data.count}件</span>
                   <div
-                    className={`w-full rounded-t-xl border-t-2 border-x-2 border-[var(--theme-border)] transition-all duration-700`}
+                    className="w-full rounded-t-xl border-t-2 border-x-2 border-[var(--theme-border)] transition-all duration-700"
                     style={{
-                      height: `${Math.max(8, (data.count / monthlyMax) * 100)}%`,
+                      height: `${barHeight}px`,
                       backgroundColor: isLatest ? 'var(--theme-primary)' : 'var(--theme-text)',
                       opacity: isLatest ? 1 : 0.25
                     }}
