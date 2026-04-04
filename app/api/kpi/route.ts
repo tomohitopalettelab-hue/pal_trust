@@ -9,22 +9,24 @@ export async function GET(req: NextRequest) {
   try {
     await ensureSurveysTable();
 
-    const totalResult = await sql`SELECT COUNT(*) as count FROM surveys`;
+    // category カラムに paletteId が格納されている
+    const totalResult = await sql`SELECT COUNT(*) as count FROM surveys WHERE category = ${cid}`;
     const totalResponses = Number(totalResult.rows[0]?.count || 0);
 
-    const avgResult = await sql`SELECT AVG(rating) as avg FROM surveys WHERE rating IS NOT NULL`;
+    const avgResult = await sql`SELECT AVG(rating) as avg FROM surveys WHERE category = ${cid} AND rating IS NOT NULL`;
     const avgScore = avgResult.rows[0]?.avg ? Number(Number(avgResult.rows[0].avg).toFixed(1)) : null;
 
     const recentResult = await sql`
       SELECT rating, category, comment, created_at
       FROM surveys
+      WHERE category = ${cid}
       ORDER BY created_at DESC
       LIMIT 1
     `;
     const latestFeedback = recentResult.rows[0] || null;
 
     const lowScoreResult = await sql`
-      SELECT COUNT(*) as count FROM surveys WHERE rating IS NOT NULL AND rating <= 2
+      SELECT COUNT(*) as count FROM surveys WHERE category = ${cid} AND rating IS NOT NULL AND rating <= 2
     `;
     const lowScoreCount = Number(lowScoreResult.rows[0]?.count || 0);
 
