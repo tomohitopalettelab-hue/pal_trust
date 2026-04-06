@@ -63,10 +63,42 @@ async function ensureTables() {
   await ensureSurveysTable();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await ensureTables();
-    const trustAccounts = await listTrustAccountsFromPalDb();
+
+    // agencyPaletteId が指定されている場合、その代理店配下の顧客のみ返す
+    const { searchParams } = new URL(request.url);
+    const agencyPaletteId = searchParams.get('agencyPaletteId');
+
+    let trustAccounts = await listTrustAccountsFromPalDb();
+
+    // agencyPaletteIdが指定されている場合、代理店のaccountIdを取得してフィルタ
+    if (agencyPaletteId) {
+      const agencyAccount = trustAccounts.find(
+        (a) => String(a.paletteId || '').toUpperCase() === agencyPaletteId.toUpperCase()
+      );
+      // 代理店自身のaccountIdでagencyIdフィルタ（代理店自身は除外）
+      if (agencyAccount) {
+        trustAccounts = trustAccounts.filter(
+          (a) => String(a.agencyId || '') === String(agencyAccount.id)
+        );
+      } else {
+        // 代理店が見つからない場合は全accounts対象でagencyIdフィルタ
+        // pal_dbの全accountsからagencyIdで検索
+        const { palDbGet } = await import('@/app/api/_lib/pal-db-client');
+        const summaryRes = await palDbGet(`/api/palette-summary?paletteId=${encodeURIComponent(agencyPaletteId)}`);
+        const summaryData = await summaryRes.json().catch(() => ({}));
+        const agencyAccountId = summaryData?.account?.id || '';
+        if (agencyAccountId) {
+          trustAccounts = trustAccounts.filter(
+            (a) => String(a.agencyId || '') === agencyAccountId
+          );
+        } else {
+          trustAccounts = [];
+        }
+      }
+    }
 
     if (!trustAccounts.length) {
       return NextResponse.json([]);

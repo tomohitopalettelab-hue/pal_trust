@@ -7,6 +7,7 @@ type PalDbAccount = {
   status: string;
   chatLoginId: string | null;
   chatPasswordSet: boolean;
+  agencyId: string | null;
   createdAt: string;
   updatedAt: string;
 };

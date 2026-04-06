@@ -8,6 +8,7 @@ import { useNotice } from '../../components/useNotice';
 
 export default function PlatformAdminLoginPage() {
   const router = useRouter();
+  const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { notice, showNotice, clearNotice } = useNotice();
@@ -21,7 +22,7 @@ export default function PlatformAdminLoginPage() {
       const res = await fetch('/api/auth/platform-admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ loginId, password }),
       });
 
       const data = await res.json();
@@ -30,6 +31,9 @@ export default function PlatformAdminLoginPage() {
       }
 
       localStorage.setItem('platformAdminLoggedIn', 'true');
+      localStorage.setItem('platformAdminPaletteId', data.paletteId || '');
+      localStorage.setItem('platformAdminAccountId', data.accountId || '');
+      localStorage.setItem('platformAdminAccountName', data.accountName || '');
       router.push('/platform-admin');
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'ログインに失敗しました', 'error');
@@ -54,7 +58,17 @@ export default function PlatformAdminLoginPage() {
 
           <form onSubmit={handleLogin} className="relative z-10 space-y-8">
             <div>
-              <label className="text-[10px] font-black text-gray-400 uppercase italic mb-3 block tracking-widest">Passphrase</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase italic mb-3 block tracking-widest">Login ID</label>
+              <input
+                type="text"
+                value={loginId}
+                onChange={(e) => setLoginId(e.target.value)}
+                placeholder="ログインID"
+                className="w-full bg-[var(--theme-text)]/10 border-2 border-[var(--theme-border)]/20 rounded-2xl px-6 py-4 text-[var(--theme-text)] font-black italic placeholder:text-[var(--theme-text)]/30 focus:outline-none focus:border-[var(--theme-border)] transition-all"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase italic mb-3 block tracking-widest">Password</label>
               <input
                 type="password"
                 value={password}

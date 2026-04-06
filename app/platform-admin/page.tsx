@@ -48,12 +48,17 @@ export default function PlatformAdminPage() {
   const [deleteTargetCustomerId, setDeleteTargetCustomerId] = useState<string | null>(null);
   const { notice, showNotice, clearNotice } = useNotice();
 
+  const [agencyPaletteId, setAgencyPaletteId] = useState('');
+  const [agencyName, setAgencyName] = useState('');
+
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('platformAdminLoggedIn') === 'true';
     if (!isLoggedIn) {
       router.replace('/platform-admin/login');
       return;
     }
+    setAgencyPaletteId(localStorage.getItem('platformAdminPaletteId') || '');
+    setAgencyName(localStorage.getItem('platformAdminAccountName') || '');
     setAuthChecking(false);
   }, [router]);
 
@@ -69,7 +74,9 @@ export default function PlatformAdminPage() {
     const loadCustomerList = async () => {
       setLoadingCustomerList(true);
       try {
-        const res = await fetch('/api/admin/customers-list');
+        const pid = localStorage.getItem('platformAdminPaletteId') || '';
+        const params = pid ? `?agencyPaletteId=${encodeURIComponent(pid)}` : '';
+        const res = await fetch(`/api/admin/customers-list${params}`);
         const data: CustomerListItem[] = await res.json();
         setCustomerList(Array.isArray(data) ? data : []);
       } catch (error) {
