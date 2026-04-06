@@ -93,17 +93,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '顧客IDとパスワードは必須です' }, { status: 400 });
     }
 
-    const verifyResponse = await palDbPost('/api/chat-auth/verify', {
-      loginId,
-      password: loginPassword,
-    });
-    const verifyData = await verifyResponse.json().catch(() => ({}));
+    // --- palette_crm で認証 ---
+    const canvasUrl = process.env.PALETTE_CANVAS_URL || 'https://palettecrm.vercel.app';
+    const crmRes = await fetch(`${canvasUrl}/api/crm/customers`, { cache: 'no-store' });
+    const crmData = await crmRes.json().catch(() => ({ data: [] }));
+    const crmCustomers: any[] = Array.isArray(crmData?.data) ? crmData.data : [];
 
-    if (!verifyResponse.ok || verifyData?.success === false) {
-      return NextResponse.json({ error: 'IDまたはパスワードが正しくありません' }, { status: 401 });
+    const matched = crmCustomers.find(
+      (c: any) =>
+        String(c.loginId || '').toUpperCase() === loginId &&
+        String(c.loginPassword || '') === loginPassword
+    );
+
+    if (!matched) {
+      // フォールバック: pal_db でも試す
+      const verifyResponse = await palDbPost('/api/chat-auth/verify', {
+        loginId,
+        password: loginPassword,
+      });
+      const verifyData = await verifyResponse.json().catch(() => ({}));
+
+      if (!verifyResponse.ok || verifyData?.success === false) {
+        return NextResponse.json({ error: 'IDまたはパスワードが正しくありません' }, { status: 401 });
+      }
     }
 
-    const paletteId = String(verifyData?.paletteId || loginId).normalize('NFKC').trim().toUpperCase();
+    const paletteId = matched
+      ? String(matched.loginId || loginId).normalize('NFKC').trim().toUpperCase()
+      : loginId;
     const trustAccount = await findTrustAccountByCustomerId(paletteId);
     if (!trustAccount) {
       return NextResponse.json({ error: 'Pal Trust契約が有効な顧客のみログインできます' }, { status: 403 });
@@ -115,7 +132,7 @@ export async function POST(request: Request) {
 
     await syncTrustCustomerProfile(
       paletteId,
-      String(trustAccount.name || verifyData?.accountName || ''),
+      String(trustAccount.name || matched?.companyName || ''),
       true,
     );
 
