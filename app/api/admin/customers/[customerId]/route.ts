@@ -131,6 +131,7 @@ export async function GET(
 
     return NextResponse.json({
       customerId: canonicalCustomerId,
+      chatLoginId: trustAccount.chatLoginId || canonicalCustomerId,
       customerName: account?.customer_name || trustAccount.name || '',
       mainPagePath: account?.main_page_path || `/main?customerId=${encodeURIComponent(canonicalCustomerId)}`,
       hasPassword: Boolean(trustAccount.chatPasswordSet),

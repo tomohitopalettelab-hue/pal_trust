@@ -123,7 +123,7 @@ export async function POST(request: Request) {
       paletteId: trustAccount.paletteId,
       name: resolvedCustomerName || trustAccount.name || '顧客名未設定',
       status: trustAccount.status || 'active',
-      chatLoginId: targetCustomerId,
+      chatLoginId: trustAccount.chatLoginId || targetCustomerId,
       chatPassword: String(password),
     });
 

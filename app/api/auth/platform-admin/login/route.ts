@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { palDbPost, palDbGet } from '@/app/api/_lib/pal-db-client';
 
 export async function POST(request: Request) {
   try {
@@ -9,51 +8,72 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'ログインIDとパスワードを入力してください' }, { status: 400 });
     }
 
-    // --- 1. pal_db (palette_canvas) でログイン認証 ---
-    const verifyRes = await palDbPost('/api/chat-auth/verify', { loginId, password });
-    const verifyData = await verifyRes.json().catch(() => ({}));
+    // --- 1. palette_crm から全顧客を取得 ---
+    const canvasUrl = process.env.PALETTE_CANVAS_URL || 'https://palettecrm.vercel.app';
+    const crmRes = await fetch(`${canvasUrl}/api/crm/customers`, { cache: 'no-store' });
+    const crmData = await crmRes.json().catch(() => ({ data: [] }));
+    const customers: any[] = Array.isArray(crmData?.data) ? crmData.data : [];
 
-    if (!verifyRes.ok || verifyData?.success === false) {
+    // --- 2. loginId/passwordで照合 ---
+    const matched = customers.find(
+      (c: any) =>
+        String(c.loginId || '') === loginId &&
+        String(c.loginPassword || '') === password
+    );
+
+    if (!matched) {
       return NextResponse.json({ error: 'ログインIDまたはパスワードが正しくありません' }, { status: 401 });
     }
 
-    const paletteId = String(verifyData?.paletteId || '').trim().toUpperCase();
-    if (!paletteId) {
-      return NextResponse.json({ error: '認証情報の取得に失敗しました' }, { status: 500 });
-    }
+    // --- 3. この顧客が「代理店」かつ「pal_trust契約あり」かチェック ---
+    // 代理店 = 他の顧客のagencyIdとして設定されている
+    const isAgency = customers.some((c: any) => c.agencyId === matched.id);
 
-    // --- 2. 契約情報を取得して agency + pal_trust を確認 ---
-    const summaryRes = await palDbGet(`/api/palette-summary?paletteId=${encodeURIComponent(paletteId)}`);
-    const summary = await summaryRes.json().catch(() => ({}));
+    // pal_trust契約チェック: pal_dbのcontractsから確認
+    const { palDbGet } = await import('@/app/api/_lib/pal-db-client');
+    const [contractsRes, plansRes] = await Promise.all([
+      palDbGet(`/api/contracts`),
+      palDbGet('/api/plans?includeInactive=1'),
+    ]);
+    const contractsBody = await contractsRes.json().catch(() => ({}));
+    const plansBody = await plansRes.json().catch(() => ({}));
+    const contracts: any[] = Array.isArray(contractsBody?.contracts) ? contractsBody.contracts : [];
+    const plans: any[] = Array.isArray(plansBody?.plans) ? plansBody.plans : [];
 
-    const contracts: any[] = Array.isArray(summary?.contracts) ? summary.contracts : [];
-    const plans: any[] = Array.isArray(summary?.plans) ? summary.plans : [];
-    const planMap = new Map<string, any>(plans.map((p: any) => [String(p.id), p]));
+    const palTrustPlanIds = new Set(
+      plans
+        .filter((p: any) => {
+          const code = String(p.code || '').toLowerCase().replace(/-/g, '_');
+          return code.includes('pal_trust') || code === 'trust' || code.startsWith('trust_');
+        })
+        .map((p: any) => String(p.id))
+    );
 
-    let hasAgency = false;
-    let hasPalTrust = false;
+    // matched.loginId（= paletteId相当）でaccountsからaccountIdを特定
+    const accountsRes = await palDbGet('/api/accounts');
+    const accountsBody = await accountsRes.json().catch(() => ({}));
+    const accounts: any[] = Array.isArray(accountsBody?.accounts) ? accountsBody.accounts : [];
+    const matchedAccount = accounts.find(
+      (a: any) => String(a.paletteId || '').toUpperCase() === String(matched.loginId || '').toUpperCase()
+        || String(a.chatLoginId || '') === String(matched.loginId || '')
+    );
 
-    for (const contract of contracts) {
-      const plan = planMap.get(String(contract.planId));
-      if (!plan) continue;
-      const code = String(plan.code || '').toLowerCase().replace(/-/g, '_');
-      if (code === 'agency' || code.startsWith('agency_')) hasAgency = true;
-      if (code.includes('pal_trust') || code === 'trust' || code.startsWith('trust_')) hasPalTrust = true;
-    }
+    const hasPalTrust = matchedAccount
+      ? contracts.some(
+          (c: any) => String(c.accountId) === String(matchedAccount.id) && palTrustPlanIds.has(String(c.planId))
+        )
+      : false;
 
-    if (!hasAgency || !hasPalTrust) {
+    if (!isAgency || !hasPalTrust) {
       return NextResponse.json({ error: '代理店かつPal Trust契約がある方のみログインできます' }, { status: 403 });
     }
 
-    // --- 3. ログイン成功：代理店情報を返す ---
-    const accountId = summary?.account?.id || '';
-    const accountName = summary?.account?.name || '';
-
+    // --- 4. ログイン成功 ---
     return NextResponse.json({
       ok: true,
-      paletteId,
-      accountId,
-      accountName,
+      paletteId: matched.loginId || '',
+      accountId: matched.id || '',
+      accountName: matched.companyName || matched.contactName || '',
     });
   } catch (error) {
     console.error('platform-admin login error:', error);

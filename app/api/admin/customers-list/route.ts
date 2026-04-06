@@ -73,31 +73,32 @@ export async function GET(request: Request) {
 
     let trustAccounts = await listTrustAccountsFromPalDb();
 
-    // agencyPaletteIdが指定されている場合、代理店のaccountIdを取得してフィルタ
+    // agencyPaletteIdが指定されている場合、palette_crmからagencyIdでフィルタ
     if (agencyPaletteId) {
-      const agencyAccount = trustAccounts.find(
-        (a) => String(a.paletteId || '').toUpperCase() === agencyPaletteId.toUpperCase()
+      const canvasUrl = process.env.PALETTE_CANVAS_URL || 'https://palettecrm.vercel.app';
+      const crmRes = await fetch(`${canvasUrl}/api/crm/customers`, { cache: 'no-store' });
+      const crmData = await crmRes.json().catch(() => ({ data: [] }));
+      const crmCustomers: any[] = Array.isArray(crmData?.data) ? crmData.data : [];
+
+      // ログインした代理店のCRM上のIDを特定（loginIdで照合）
+      const agencyCustomer = crmCustomers.find(
+        (c: any) => String(c.loginId || '').toUpperCase() === agencyPaletteId.toUpperCase()
       );
-      // 代理店自身のaccountIdでagencyIdフィルタ（代理店自身は除外）
-      if (agencyAccount) {
-        trustAccounts = trustAccounts.filter(
-          (a) => String(a.agencyId || '') === String(agencyAccount.id)
-        );
-      } else {
-        // 代理店が見つからない場合は全accounts対象でagencyIdフィルタ
-        // pal_dbの全accountsからagencyIdで検索
-        const { palDbGet } = await import('@/app/api/_lib/pal-db-client');
-        const summaryRes = await palDbGet(`/api/palette-summary?paletteId=${encodeURIComponent(agencyPaletteId)}`);
-        const summaryData = await summaryRes.json().catch(() => ({}));
-        const agencyAccountId = summaryData?.account?.id || '';
-        if (agencyAccountId) {
-          trustAccounts = trustAccounts.filter(
-            (a) => String(a.agencyId || '') === agencyAccountId
-          );
-        } else {
-          trustAccounts = [];
-        }
-      }
+      const agencyAccountId = agencyCustomer?.id || '';
+
+      // agencyIdが一致するCRM顧客のloginIdリストを取得
+      const childLoginIds = new Set(
+        crmCustomers
+          .filter((c: any) => c.agencyId && c.agencyId === agencyAccountId)
+          .map((c: any) => String(c.loginId || '').toUpperCase())
+          .filter(Boolean)
+      );
+
+      // trustAccountsをCRMの代理店配下の顧客のみに絞る
+      trustAccounts = trustAccounts.filter((a) =>
+        childLoginIds.has(String(a.paletteId || '').toUpperCase()) ||
+        childLoginIds.has(String(a.chatLoginId || '').toUpperCase())
+      );
     }
 
     if (!trustAccounts.length) {

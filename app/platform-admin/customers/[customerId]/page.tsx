@@ -218,7 +218,7 @@ export default function CustomerDetailPage() {
                 className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 disabled:opacity-70"
               />
             </label>
-            <p>ログインID: {detail?.customerId || customerId}</p>
+            <p>ログインID: {(detail as any)?.chatLoginId || detail?.customerId || customerId}</p>
             <p>ログインPW: {detail?.hasPassword ? '設定済み（再設定は一覧画面）' : '未設定'}</p>
             <p>アカウント更新: {detail?.accountUpdatedAt ? new Date(detail.accountUpdatedAt).toLocaleString('ja-JP') : '-'}</p>
             <label className="space-y-1 md:col-span-2">
