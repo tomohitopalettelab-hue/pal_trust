@@ -73,31 +73,18 @@ export async function GET(request: Request) {
 
     let trustAccounts = await listTrustAccountsFromPalDb();
 
-    // agencyPaletteIdが指定されている場合、palette_crmからagencyIdでフィルタ
+    // agencyPaletteIdが指定されている場合、agencyIdでフィルタ
     if (agencyPaletteId) {
-      const canvasUrl = process.env.PALETTE_CANVAS_URL || 'https://palettecrm.vercel.app';
-      const crmRes = await fetch(`${canvasUrl}/api/crm/customers`, { cache: 'no-store' });
-      const crmData = await crmRes.json().catch(() => ({ data: [] }));
-      const crmCustomers: any[] = Array.isArray(crmData?.data) ? crmData.data : [];
-
-      // ログインした代理店のCRM上のIDを特定（loginIdで照合）
-      const agencyCustomer = crmCustomers.find(
-        (c: any) => String(c.loginId || '').toUpperCase() === agencyPaletteId.toUpperCase()
+      // ログインした代理店のaccountIdを特定
+      const agencyAccount = trustAccounts.find(
+        (a) => String(a.paletteId || '').toUpperCase() === agencyPaletteId.toUpperCase()
+          || String(a.chatLoginId || '').toUpperCase() === agencyPaletteId.toUpperCase()
       );
-      const agencyAccountId = agencyCustomer?.id || '';
+      const agencyAccountId = agencyAccount?.id || '';
 
-      // agencyIdが一致するCRM顧客のloginIdリストを取得
-      const childLoginIds = new Set(
-        crmCustomers
-          .filter((c: any) => c.agencyId && c.agencyId === agencyAccountId)
-          .map((c: any) => String(c.loginId || '').toUpperCase())
-          .filter(Boolean)
-      );
-
-      // trustAccountsをCRMの代理店配下の顧客のみに絞る
-      trustAccounts = trustAccounts.filter((a) =>
-        childLoginIds.has(String(a.paletteId || '').toUpperCase()) ||
-        childLoginIds.has(String(a.chatLoginId || '').toUpperCase())
+      // agencyIdが一致する顧客のみ（代理店自身は除外）
+      trustAccounts = trustAccounts.filter(
+        (a) => a.agencyId && a.agencyId === agencyAccountId
       );
     }
 

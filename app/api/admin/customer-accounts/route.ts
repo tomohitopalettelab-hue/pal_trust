@@ -1,7 +1,6 @@
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
 import { listTrustAccountsFromPalDb, findTrustAccountByCustomerId } from '@/app/api/_lib/pal-trust-accounts';
-import { palDbPost } from '@/app/api/_lib/pal-db-client';
 
 type AccountRow = {
   customer_id: string;
@@ -118,20 +117,6 @@ export async function POST(request: Request) {
       DO UPDATE SET customer_name = EXCLUDED.customer_name, main_page_path = EXCLUDED.main_page_path, updated_at = NOW();
     `;
 
-    const saveRes = await palDbPost('/api/accounts', {
-      id: trustAccount.id,
-      paletteId: trustAccount.paletteId,
-      name: resolvedCustomerName || trustAccount.name || '顧客名未設定',
-      status: trustAccount.status || 'active',
-      chatLoginId: trustAccount.chatLoginId || targetCustomerId,
-      chatPassword: String(password),
-    });
-
-    if (!saveRes.ok) {
-      const body = await saveRes.json().catch(() => ({}));
-      return NextResponse.json({ error: body?.error || 'pal_dbへの保存に失敗しました' }, { status: 500 });
-    }
-
     return NextResponse.json({ ok: true, customerId: targetCustomerId, mainPagePath: `/main?customerId=${encodeURIComponent(targetCustomerId)}` });
   } catch (error) {
     console.error('customer accounts post error:', error);
@@ -154,19 +139,6 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Pal Trust契約中の顧客が見つかりません' }, { status: 404 });
     }
 
-    const saveRes = await palDbPost('/api/accounts', {
-      id: trustAccount.id,
-      paletteId: trustAccount.paletteId,
-      name: trustAccount.name || '顧客名未設定',
-      status: isActive ? 'active' : 'inactive',
-      chatLoginId: trustAccount.chatLoginId || trustAccount.paletteId,
-    });
-
-    if (!saveRes.ok) {
-      const saveBody = await saveRes.json().catch(() => ({}));
-      return NextResponse.json({ error: saveBody?.error || 'pal_dbへの状態更新に失敗しました' }, { status: 500 });
-    }
-
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('customer accounts patch error:', error);
@@ -186,19 +158,6 @@ export async function DELETE(request: Request) {
     const trustAccount = await findTrustAccountByCustomerId(customerId);
     if (!trustAccount) {
       return NextResponse.json({ error: 'Pal Trust契約中の顧客が見つかりません' }, { status: 404 });
-    }
-
-    const saveRes = await palDbPost('/api/accounts', {
-      id: trustAccount.id,
-      paletteId: trustAccount.paletteId,
-      name: trustAccount.name || '顧客名未設定',
-      status: 'inactive',
-      chatLoginId: trustAccount.chatLoginId || trustAccount.paletteId,
-    });
-
-    if (!saveRes.ok) {
-      const saveBody = await saveRes.json().catch(() => ({}));
-      return NextResponse.json({ error: saveBody?.error || 'pal_dbへの停止反映に失敗しました' }, { status: 500 });
     }
 
     await ensureTable();

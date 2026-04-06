@@ -1,7 +1,6 @@
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
 import { findTrustAccountByCustomerId } from '@/app/api/_lib/pal-trust-accounts';
-import { palDbPost } from '@/app/api/_lib/pal-db-client';
 import { ensureSurveysTable } from '@/app/api/_lib/ensure-surveys-table';
 
 type AccountRow = {
@@ -185,18 +184,6 @@ export async function PATCH(
         updated_at = NOW();
     `;
 
-    const saveRes = await palDbPost('/api/accounts', {
-      id: trustAccount.id,
-      paletteId: trustAccount.paletteId,
-      name: customerName || trustAccount.name || '顧客名未設定',
-      status: trustAccount.status || 'active',
-      chatLoginId: trustAccount.chatLoginId || trustAccount.paletteId,
-    });
-
-    if (!saveRes.ok) {
-      const body = await saveRes.json().catch(() => ({}));
-      return NextResponse.json({ error: body?.error || 'pal_dbへの顧客名更新に失敗しました' }, { status: 500 });
-    }
 
     const mergedData = {
       settings,

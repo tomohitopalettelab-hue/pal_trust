@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
-import { palDbPost } from '@/app/api/_lib/pal-db-client';
+import { verifyCrmLogin } from '@/app/api/_lib/palette-crm-client';
 import { findTrustAccountByCustomerId } from '@/app/api/_lib/pal-trust-accounts';
 
 const DEFAULT_SETTINGS = {
@@ -34,22 +34,9 @@ async function ensureTrustCustomerTables() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
-
-  await sql`
-    ALTER TABLE customer_accounts
-    ADD COLUMN IF NOT EXISTS customer_name TEXT;
-  `;
-
-  await sql`
-    ALTER TABLE customer_accounts
-    ADD COLUMN IF NOT EXISTS main_page_path TEXT;
-  `;
-
-  await sql`
-    ALTER TABLE customer_accounts
-    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
-  `;
-
+  await sql`ALTER TABLE customer_accounts ADD COLUMN IF NOT EXISTS customer_name TEXT;`;
+  await sql`ALTER TABLE customer_accounts ADD COLUMN IF NOT EXISTS main_page_path TEXT;`;
+  await sql`ALTER TABLE customer_accounts ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;`;
   await sql`
     CREATE TABLE IF NOT EXISTS customer_app_settings (
       customer_id TEXT PRIMARY KEY,
@@ -62,9 +49,7 @@ async function ensureTrustCustomerTables() {
 async function syncTrustCustomerProfile(customerId: string, customerName: string, isActive: boolean) {
   const normalizedCustomerId = String(customerId || '').trim().toUpperCase();
   const normalizedName = String(customerName || '').trim();
-
   await ensureTrustCustomerTables();
-
   await sql`
     INSERT INTO customer_accounts (customer_id, customer_name, main_page_path, password_hash, is_active, updated_at)
     VALUES (${normalizedCustomerId}, ${normalizedName}, ${`/main?customerId=${encodeURIComponent(normalizedCustomerId)}`}, ${''}, ${isActive}, NOW())
@@ -75,7 +60,6 @@ async function syncTrustCustomerProfile(customerId: string, customerName: string
       is_active = EXCLUDED.is_active,
       updated_at = NOW();
   `;
-
   await sql`
     INSERT INTO customer_app_settings (customer_id, data, updated_at)
     VALUES (${normalizedCustomerId}, ${JSON.stringify(DEFAULT_SETTINGS)}, NOW())
@@ -86,41 +70,22 @@ async function syncTrustCustomerProfile(customerId: string, customerName: string
 export async function POST(request: Request) {
   try {
     const { customerId, password } = await request.json();
-    const loginId = String(customerId || '').normalize('NFKC').trim().toUpperCase();
+    const loginId = String(customerId || '').normalize('NFKC').trim();
     const loginPassword = String(password || '');
 
     if (!loginId || !loginPassword) {
       return NextResponse.json({ error: '顧客IDとパスワードは必須です' }, { status: 400 });
     }
 
-    // --- palette_crm で認証 ---
-    const canvasUrl = process.env.PALETTE_CANVAS_URL || 'https://palettecrm.vercel.app';
-    const crmRes = await fetch(`${canvasUrl}/api/crm/customers`, { cache: 'no-store' });
-    const crmData = await crmRes.json().catch(() => ({ data: [] }));
-    const crmCustomers: any[] = Array.isArray(crmData?.data) ? crmData.data : [];
-
-    const matched = crmCustomers.find(
-      (c: any) =>
-        String(c.loginId || '').toUpperCase() === loginId &&
-        String(c.loginPassword || '') === loginPassword
-    );
-
+    // palette_crm で認証
+    const matched = await verifyCrmLogin(loginId, loginPassword);
     if (!matched) {
-      // フォールバック: pal_db でも試す
-      const verifyResponse = await palDbPost('/api/chat-auth/verify', {
-        loginId,
-        password: loginPassword,
-      });
-      const verifyData = await verifyResponse.json().catch(() => ({}));
-
-      if (!verifyResponse.ok || verifyData?.success === false) {
-        return NextResponse.json({ error: 'IDまたはパスワードが正しくありません' }, { status: 401 });
-      }
+      return NextResponse.json({ error: 'IDまたはパスワードが正しくありません' }, { status: 401 });
     }
 
-    const paletteId = matched
-      ? String(matched.loginId || loginId).normalize('NFKC').trim().toUpperCase()
-      : loginId;
+    const paletteId = String(matched.loginId || loginId).normalize('NFKC').trim().toUpperCase();
+
+    // Pal Trust契約チェック（palette_crmの全顧客から照合）
     const trustAccount = await findTrustAccountByCustomerId(paletteId);
     if (!trustAccount) {
       return NextResponse.json({ error: 'Pal Trust契約が有効な顧客のみログインできます' }, { status: 403 });
@@ -130,11 +95,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'このアカウントは停止中です' }, { status: 403 });
     }
 
-    await syncTrustCustomerProfile(
-      paletteId,
-      String(trustAccount.name || matched?.companyName || ''),
-      true,
-    );
+    await syncTrustCustomerProfile(paletteId, String(trustAccount.name || matched.companyName || ''), true);
 
     return NextResponse.json({ ok: true, customerId: paletteId });
   } catch (error) {
