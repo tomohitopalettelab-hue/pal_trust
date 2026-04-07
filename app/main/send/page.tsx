@@ -139,11 +139,34 @@ function SendSurveyContent() {
     }
   };
 
-  const channels: { key: SendChannel; label: string; icon: string }[] = [
-    { key: 'sms', label: 'SMS', icon: '📱' },
-    { key: 'email', label: 'メール', icon: '✉️' },
-    { key: 'line_broadcast', label: 'LINE全員', icon: '💬' },
-    { key: 'line_push', label: 'LINE個別', icon: '👤' },
+  const channelIcons: Record<string, React.ReactNode> = {
+    sms: (
+      <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      </svg>
+    ),
+    email: (
+      <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+    line_broadcast: (
+      <svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 5.81 2 10.5c0 2.67 1.56 5.03 4 6.55V21l3.77-2.08c.72.13 1.47.2 2.23.2 5.52 0 10-3.81 10-8.5S17.52 2 12 2zm-1 11.5H8.5L7 11h2.5V8.5H11v5zm5.5 0H14V8.5h1v3h2l-1.5 2z"/>
+      </svg>
+    ),
+    line_push: (
+      <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      </svg>
+    ),
+  };
+
+  const channels: { key: SendChannel; label: string }[] = [
+    { key: 'sms', label: 'SMS' },
+    { key: 'email', label: 'メール' },
+    { key: 'line_broadcast', label: 'LINE全員' },
+    { key: 'line_push', label: 'LINE個別' },
   ];
 
   return (
@@ -194,7 +217,7 @@ function SendSurveyContent() {
                     : 'border-[var(--theme-border)]'
                 }`}
               >
-                <span className="text-2xl block mb-2">{ch.icon}</span>
+                <div className="flex justify-center mb-2">{channelIcons[ch.key]}</div>
                 {ch.label}
               </button>
             ))}
