@@ -74,8 +74,9 @@ export default function PlatformAdminPage() {
     const loadCustomerList = async () => {
       setLoadingCustomerList(true);
       try {
+        const role = localStorage.getItem('platformAdminRole') || 'agency';
         const pid = localStorage.getItem('platformAdminPaletteId') || '';
-        const params = pid ? `?agencyPaletteId=${encodeURIComponent(pid)}` : '';
+        const params = role === 'admin' ? '' : (pid ? `?agencyPaletteId=${encodeURIComponent(pid)}` : '');
         const res = await fetch(`/api/admin/customers-list${params}`);
         const data: CustomerListItem[] = await res.json();
         setCustomerList(Array.isArray(data) ? data : []);

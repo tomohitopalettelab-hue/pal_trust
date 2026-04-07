@@ -9,6 +9,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'ログインIDとパスワードを入力してください' }, { status: 400 });
     }
 
+    // --- 0. 管理者チェック ---
+    const adminId = process.env.PLATFORM_ADMIN_LOGIN_ID || 'tomohito0108';
+    const adminPw = process.env.PLATFORM_ADMIN_PASSWORD || process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '';
+    if (loginId === adminId && password === adminPw) {
+      return NextResponse.json({
+        ok: true,
+        role: 'admin',
+        paletteId: '',
+        accountId: '',
+        accountName: '管理者',
+      });
+    }
+
     // --- 1. palette_crm で認証 ---
     const matched = await verifyCrmLogin(loginId, password);
     if (!matched) {
@@ -23,9 +36,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '代理店として登録されている方のみログインできます' }, { status: 403 });
     }
 
-    // --- 3. ログイン成功 ---
+    // --- 3. ログイン成功（代理店） ---
     return NextResponse.json({
       ok: true,
+      role: 'agency',
       paletteId: matched.loginId || '',
       accountId: matched.id || '',
       accountName: matched.companyName || matched.contactName || '',

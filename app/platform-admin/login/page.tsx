@@ -31,6 +31,7 @@ export default function PlatformAdminLoginPage() {
       }
 
       localStorage.setItem('platformAdminLoggedIn', 'true');
+      localStorage.setItem('platformAdminRole', data.role || 'agency');
       localStorage.setItem('platformAdminPaletteId', data.paletteId || '');
       localStorage.setItem('platformAdminAccountId', data.accountId || '');
       localStorage.setItem('platformAdminAccountName', data.accountName || '');
