@@ -7,6 +7,7 @@ type SendRequest = {
   channel: 'sms' | 'line_broadcast' | 'line_push' | 'email';
   recipients: string[];
   message?: string;
+  subject?: string;
 };
 
 const SMS_MONTHLY_LIMIT = 100;
@@ -54,15 +55,21 @@ async function sendSms(settings: Record<string, unknown>, to: string, message: s
 }
 
 // --- Email via Resend ---
-async function sendEmail(to: string, surveyUrl: string, appName: string) {
+async function sendEmail(to: string, subject: string, bodyText: string) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error('RESEND_API_KEYが環境変数に設定されていません');
   const { Resend } = await import('resend');
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  await resend.emails.send({
+  const resend = new Resend(apiKey);
+  const htmlBody = bodyText.split('\n').map((line) => `<p>${line || '&nbsp;'}</p>`).join('');
+  const result = await resend.emails.send({
     from: process.env.RESEND_FROM_EMAIL || 'Pal Trust <noreply@palette-lab.com>',
     to,
-    subject: `${appName || 'Pal Trust'} アンケートのお願い`,
-    html: `<p>いつもご利用ありがとうございます。</p><p>以下のリンクからアンケートにご回答いただけると幸いです。</p><p><a href="${surveyUrl}">${surveyUrl}</a></p><p>ご協力よろしくお願いいたします。</p>`,
+    subject,
+    html: htmlBody,
   });
+  if (result.error) {
+    throw new Error(result.error.message || 'Resend送信エラー');
+  }
 }
 
 // --- LINE Broadcast ---
@@ -115,7 +122,7 @@ export async function POST(request: Request) {
     const settings = await getCustomerSettings(customerId);
     const surveyUrl = buildSurveyUrl(customerId);
     const defaultMessage = body.message || `アンケートにご協力ください！\n${surveyUrl}`;
-    const appName = String(settings.appName || 'Pal Trust');
+    const emailSubject = body.subject || 'アンケートのお願い';
 
     let sentCount = 0;
     const errors: string[] = [];
@@ -144,7 +151,7 @@ export async function POST(request: Request) {
       }
       for (const to of recipients) {
         try {
-          await sendEmail(to, surveyUrl, appName);
+          await sendEmail(to, emailSubject, defaultMessage);
           await recordSend(customerId, 'email', to);
           sentCount++;
         } catch (err) {
@@ -179,6 +186,10 @@ export async function POST(request: Request) {
       }
     } else {
       return NextResponse.json({ error: `不明なチャネル: ${channel}` }, { status: 400 });
+    }
+
+    if (sentCount === 0 && errors.length) {
+      return NextResponse.json({ error: errors[0], errors }, { status: 500 });
     }
 
     return NextResponse.json({

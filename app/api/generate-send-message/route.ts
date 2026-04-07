@@ -3,43 +3,55 @@ import { sql } from '@vercel/postgres';
 
 export async function POST(req: Request) {
   try {
-    const { customerId, title, channel } = await req.json();
+    const { customerId, title, channel, targetType, taste, campaign } = await req.json();
 
-    // 顧客設定を取得
     const { rows } = await sql`
       SELECT data FROM customer_app_settings WHERE customer_id = ${customerId} LIMIT 1;
     `;
     const settings = rows[0]?.data?.settings || {};
-    const appName = String(settings.appName || 'お店');
     const industry = String(settings.industry || '');
 
     const surveyUrl = `https://trust.palette-lab.com/survey?customerId=${encodeURIComponent(customerId)}`;
 
+    const isEmail = channel === 'email';
     const isShort = channel === 'sms' || channel === 'line_broadcast' || channel === 'line_push';
     const maxChars = isShort ? 100 : 300;
 
+    const targetMap: Record<string, string> = {
+      new: '初めて来店・利用したお客様',
+      existing: '何度か来店・利用している既存のお客様',
+      past: 'しばらく来店・利用がない過去のお客様',
+    };
+
+    const tasteMap: Record<string, string> = {
+      aftercare: 'ご来店・ご利用後のアフターフォローとして、感謝を伝えつつアンケートをお願いする温かい文面',
+      survey: 'シンプルにアンケート回答をお願いする丁寧な文面',
+      campaign: 'キャンペーン・特典感のあるワクワクする文面',
+    };
+
+    const targetInstruction = targetMap[targetType] || targetMap.existing;
+    const tasteInstruction = tasteMap[taste] || tasteMap.survey;
+
     const prompt = `
-あなたはお店からお客様へアンケートの依頼メッセージを作成するアシスタントです。
+あなたはお店からお客様へアンケート依頼メッセージを作成するアシスタントです。
 
-【店舗情報】
-・店舗名: ${appName}
-${industry ? `・業種: ${industry}` : ''}
+${industry ? `【業種】${industry}` : ''}
 
-【送信チャネル】${channel === 'sms' ? 'SMS' : channel === 'email' ? 'メール' : 'LINE'}
-
-${title ? `【タイトル/テーマ】\n${title}\nこのタイトルに合わせた内容で書いてください。` : '【指示】\n来店後のお客様にアンケート回答をお願いする内容で書いてください。'}
+【ターゲット】${targetInstruction}
+【テイスト】${tasteInstruction}
+${campaign ? `【キャンペーン/お礼】アンケート回答者への特典: ${campaign}\nこの特典内容を自然に文面に盛り込んでください。` : ''}
+${title ? `【タイトル/テーマ】${title}\nこのテーマに合わせた内容で書いてください。` : ''}
 
 【制約】
-・${maxChars}文字以内
+・${maxChars}文字以内（${isEmail ? '本文のみ' : '全体'}）
 ・敬語で丁寧に
-・アンケートURLは「{url}」というプレースホルダーで記載（実際のURLは後で自動挿入されます）
-・メールの場合は件名と本文を「件名:」「本文:」で分けて出力
-・SMS/LINEの場合は本文のみ出力
+・店舗名やサービス名は文中に含めないこと（宛先で分かるため不要）
+・アンケートURLは「${surveyUrl}」をそのまま記載
 ・押しつけがましくない自然な文面
 ・絵文字は控えめに
 
-【出力ルール】
-・文章のみを出力してください
+${isEmail ? `【出力形式】以下のJSON形式のみを出力してください。他のテキストは不要です。
+{"subject":"件名をここに","body":"本文をここに"}` : '【出力ルール】本文のみを出力してください。'}
 `;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -60,11 +72,25 @@ ${title ? `【タイトル/テーマ】\n${title}\nこのタイトルに合わ�
       throw new Error(data.error?.message || 'AI生成に失敗しました');
     }
 
-    let generatedText = data.choices?.[0]?.message?.content || '';
-    // {url}プレースホルダーを実際のURLに置換
-    generatedText = generatedText.replace(/\{url\}/g, surveyUrl);
+    const raw = data.choices?.[0]?.message?.content || '';
 
-    return NextResponse.json({ message: generatedText });
+    if (isEmail) {
+      // JSONパース試行
+      try {
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return NextResponse.json({
+            subject: String(parsed.subject || ''),
+            body: String(parsed.body || ''),
+          });
+        }
+      } catch { /* fall through */ }
+      // パース失敗時はそのまま返す
+      return NextResponse.json({ subject: '', body: raw });
+    }
+
+    return NextResponse.json({ message: raw });
   } catch (error) {
     console.error('generate-send-message error:', error);
     const message = error instanceof Error ? error.message : '不明なエラー';

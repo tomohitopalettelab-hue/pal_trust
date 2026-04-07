@@ -45,6 +45,9 @@ function SendSurveyContent() {
   const [sendRecipients, setSendRecipients] = useState('');
   const [sendMessage, setSendMessage] = useState('');
   const [messageTitle, setMessageTitle] = useState('');
+  const [targetType, setTargetType] = useState<'new' | 'existing' | 'past'>('existing');
+  const [taste, setTaste] = useState<'aftercare' | 'survey' | 'campaign'>('survey');
+  const [campaignText, setCampaignText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -81,11 +84,19 @@ function SendSurveyContent() {
           customerId,
           title: withTitle ? messageTitle : '',
           channel: sendChannel,
+          targetType,
+          taste,
+          campaign: campaignText,
         }),
       });
       const data = await res.json();
-      if (res.ok && data.message) {
-        setSendMessage(data.message);
+      if (res.ok) {
+        if (sendChannel === 'email' && data.subject) {
+          setMessageTitle(data.subject);
+          setSendMessage(data.body || '');
+        } else {
+          setSendMessage(data.message || data.body || '');
+        }
       } else {
         showNotice(data.error || 'AI生成に失敗しました', 'error');
       }
@@ -119,7 +130,7 @@ function SendSurveyContent() {
       const res = await fetch('/api/send-survey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage }),
+        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage, subject: messageTitle }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -285,9 +296,67 @@ function SendSurveyContent() {
         <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] mb-6">
           <h2 className="text-sm font-black italic uppercase mb-4">送信内容</h2>
 
+          {/* ターゲット・テイスト・キャンペーン */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+            <div>
+              <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">ターゲット</label>
+              <div className="flex gap-2">
+                {([
+                  { key: 'new' as const, label: '新規顧客' },
+                  { key: 'existing' as const, label: '既存顧客' },
+                  { key: 'past' as const, label: '過去顧客' },
+                ]).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setTargetType(t.key)}
+                    className={`flex-1 py-2 rounded-xl border-2 text-[11px] font-black transition-all ${
+                      targetType === t.key
+                        ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10'
+                        : 'border-[var(--theme-border)]'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">テイスト</label>
+              <div className="flex gap-2">
+                {([
+                  { key: 'aftercare' as const, label: 'アフターフォロー' },
+                  { key: 'survey' as const, label: 'アンケートお願い' },
+                  { key: 'campaign' as const, label: 'キャンペーン風' },
+                ]).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setTaste(t.key)}
+                    className={`flex-1 py-2 rounded-xl border-2 text-[11px] font-black transition-all ${
+                      taste === t.key
+                        ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10'
+                        : 'border-[var(--theme-border)]'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="mb-5">
+            <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">キャンペーン / お礼内容（任意）</label>
+            <input
+              type="text"
+              value={campaignText}
+              onChange={(e) => setCampaignText(e.target.value)}
+              placeholder="例: アンケート回答で次回10%OFF"
+              className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
+            />
+          </div>
+
           {/* タイトル入力 + AI生成ボタン */}
           <div className="mb-4">
-            <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">タイトル / テーマ（任意）</label>
+            <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">{sendChannel === 'email' ? 'メール件名' : 'タイトル / テーマ'}（任意）</label>
             <input
               type="text"
               value={messageTitle}
