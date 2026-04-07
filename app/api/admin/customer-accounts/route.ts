@@ -73,9 +73,9 @@ export async function GET() {
   try {
     const trustAccounts = await listTrustAccountsFromPalDb();
     return NextResponse.json(trustAccounts.map((account) => ({
-      customerId: account.paletteId,
+      customerId: account.chatLoginId || account.paletteId,
       customerName: account.name || '',
-      mainPagePath: `/main?customerId=${encodeURIComponent(account.paletteId)}`,
+      mainPagePath: `/main?customerId=${encodeURIComponent(account.chatLoginId || account.paletteId)}`,
       isActive: String(account.status || '').toLowerCase() === 'active',
       createdAt: account.createdAt,
       updatedAt: account.updatedAt,
@@ -90,10 +90,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { customerId, customerName, password } = await request.json();
-    const targetCustomerId = String(customerId || '').trim().toUpperCase();
+    const targetCustomerId = String(customerId || '').trim();
 
     if (!targetCustomerId || !password) {
-      return NextResponse.json({ error: '顧客IDとパスワードは必須です' }, { status: 400 });
+      return NextResponse.json({ error: 'ログインIDとパスワードは必須です' }, { status: 400 });
     }
 
     const trustAccount = await findTrustAccountByCustomerId(targetCustomerId);
