@@ -31,13 +31,6 @@ function OwnerDashboardContent() {
   const [customerId, setCustomerId] = useState('');
   const [authChecking, setAuthChecking] = useState(true);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showSendModal, setShowSendModal] = useState(false);
-  const [sendChannel, setSendChannel] = useState<'sms' | 'email' | 'line_broadcast' | 'line_push'>('sms');
-  const [sendRecipients, setSendRecipients] = useState('');
-  const [sendLoading, setSendLoading] = useState(false);
-  const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [lineFriends, setLineFriends] = useState<Array<{ line_user_id: string; display_name: string }>>([]);
-  const [selectedLineFriends, setSelectedLineFriends] = useState<string[]>([]);
   const [isShareModalClosing, setIsShareModalClosing] = useState(false);
   const shareModalCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -476,152 +469,6 @@ function OwnerDashboardContent() {
         </div>
       )}
 
-      {/* --- アンケート送信モーダル --- */}
-      {showSendModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-2xl" onClick={() => setShowSendModal(false)} />
-          <div className="relative bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] p-8 rounded-[3.5rem] w-full max-w-md shadow-[0_30px_100px_rgba(0,0,0,0.4)] max-h-[90vh] overflow-y-auto">
-            <h3 className="text-2xl font-black italic uppercase tracking-tighter mb-2">アンケート送信</h3>
-            <p className="text-[10px] font-black text-[var(--theme-text)]/60 uppercase mb-6">Send Survey</p>
-
-            {/* チャネル選択 */}
-            <div className="grid grid-cols-2 gap-2 mb-6">
-              {([
-                { key: 'sms' as const, label: 'SMS', icon: '📱' },
-                { key: 'email' as const, label: 'メール', icon: '✉️' },
-                { key: 'line_broadcast' as const, label: 'LINE全員', icon: '💬' },
-                { key: 'line_push' as const, label: 'LINE個別', icon: '👤' },
-              ]).map((ch) => (
-                <button
-                  key={ch.key}
-                  onClick={() => {
-                    setSendChannel(ch.key);
-                    setSendResult(null);
-                    if (ch.key === 'line_push' && !lineFriends.length) {
-                      fetch(`/api/line-friends?customerId=${encodeURIComponent(customerId)}`)
-                        .then((r) => r.json())
-                        .then((d) => setLineFriends(d.friends || []))
-                        .catch(() => {});
-                    }
-                  }}
-                  className={`p-3 rounded-2xl border-2 font-black text-xs transition-all ${
-                    sendChannel === ch.key
-                      ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10'
-                      : 'border-[var(--theme-border)]'
-                  }`}
-                >
-                  <span className="text-xl block mb-1">{ch.icon}</span>
-                  {ch.label}
-                </button>
-              ))}
-            </div>
-
-            {/* 宛先入力 */}
-            {sendChannel === 'sms' && (
-              <div className="mb-4">
-                <label className="text-[10px] font-black text-[var(--theme-text)]/60 uppercase mb-2 block">電話番号（改行区切りで複数可）</label>
-                <textarea
-                  value={sendRecipients}
-                  onChange={(e) => setSendRecipients(e.target.value)}
-                  placeholder={"+8190xxxxxxxx\n+8180xxxxxxxx"}
-                  rows={3}
-                  className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 text-sm"
-                />
-              </div>
-            )}
-            {sendChannel === 'email' && (
-              <div className="mb-4">
-                <label className="text-[10px] font-black text-[var(--theme-text)]/60 uppercase mb-2 block">メールアドレス（改行区切りで複数可）</label>
-                <textarea
-                  value={sendRecipients}
-                  onChange={(e) => setSendRecipients(e.target.value)}
-                  placeholder={"test@example.com\nuser@example.com"}
-                  rows={3}
-                  className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 text-sm"
-                />
-              </div>
-            )}
-            {sendChannel === 'line_broadcast' && (
-              <p className="text-sm font-black text-[var(--theme-text)]/70 mb-4">LINE公式アカウントの友だち全員にアンケートURLを送信します。</p>
-            )}
-            {sendChannel === 'line_push' && (
-              <div className="mb-4">
-                <label className="text-[10px] font-black text-[var(--theme-text)]/60 uppercase mb-2 block">送信先を選択</label>
-                {lineFriends.length ? (
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {lineFriends.map((f) => (
-                      <label key={f.line_user_id} className="flex items-center gap-2 p-2 rounded-xl border border-[var(--theme-border)] text-sm font-bold cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selectedLineFriends.includes(f.line_user_id)}
-                          onChange={(e) => {
-                            setSelectedLineFriends((prev) =>
-                              e.target.checked ? [...prev, f.line_user_id] : prev.filter((id) => id !== f.line_user_id)
-                            );
-                          }}
-                        />
-                        {f.display_name || f.line_user_id}
-                      </label>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-[var(--theme-text)]/50">友だちデータがありません。LINE Webhookを設定してください。</p>
-                )}
-              </div>
-            )}
-
-            {/* 結果表示 */}
-            {sendResult && (
-              <div className={`mb-4 p-3 rounded-xl text-sm font-bold ${sendResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                {sendResult.message}
-              </div>
-            )}
-
-            {/* 送信ボタン */}
-            <button
-              onClick={async () => {
-                setSendLoading(true);
-                setSendResult(null);
-                try {
-                  const recipients = sendChannel === 'line_broadcast'
-                    ? ['broadcast']
-                    : sendChannel === 'line_push'
-                      ? selectedLineFriends
-                      : sendRecipients.split('\n').map((s) => s.trim()).filter(Boolean);
-                  if (!recipients.length) {
-                    setSendResult({ success: false, message: '送信先を入力してください' });
-                    return;
-                  }
-                  const res = await fetch('/api/send-survey', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ customerId, channel: sendChannel, recipients }),
-                  });
-                  const data = await res.json();
-                  if (res.ok && data.success) {
-                    setSendResult({ success: true, message: `${data.sentCount}件送信しました！` });
-                    setSendRecipients('');
-                    setSelectedLineFriends([]);
-                  } else {
-                    setSendResult({ success: false, message: data.error || '送信に失敗しました' });
-                  }
-                } catch {
-                  setSendResult({ success: false, message: '送信中にエラーが発生しました' });
-                } finally {
-                  setSendLoading(false);
-                }
-              }}
-              disabled={sendLoading}
-              className="w-full bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-[3px] border-[var(--theme-border)] py-4 rounded-2xl font-black text-sm italic shadow-[6px_6px_0px_var(--theme-border)] active:scale-[0.98] transition-all disabled:opacity-60 mb-4"
-            >
-              {sendLoading ? '送信中...' : '送信する'}
-            </button>
-
-            <button onClick={() => setShowSendModal(false)} className="w-full py-2 text-[var(--theme-text)] opacity-40 font-black text-[10px] uppercase tracking-[0.4em]">Close</button>
-          </div>
-        </div>
-      )}
-
       {/* --- メインコンテンツ容器 --- */}
       <div className="max-w-7xl mx-auto p-6 md:p-12 pb-44">
         
@@ -707,13 +554,12 @@ function OwnerDashboardContent() {
               </a>
 
               {/* 4. アンケート送信 */}
-              <button
-                onClick={() => { setShowSendModal(true); setSendResult(null); }}
-                className="w-full h-full bg-[var(--theme-card-bg)] text-[var(--theme-text)] border-[3px] border-[var(--theme-border)] p-8 rounded-[3rem] flex flex-col lg:flex-row items-center justify-center gap-4 shadow-[8px_8px_0px_var(--theme-border)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
-              >
-                <span className="text-5xl lg:text-3xl">📨</span>
-                <span className="text-xs font-black italic uppercase">アンケート送信</span>
-              </button>
+              <Link href={`/main/send?customerId=${encodeURIComponent(customerId)}`} className="w-full">
+                <button className="w-full h-full bg-[var(--theme-card-bg)] text-[var(--theme-text)] border-[3px] border-[var(--theme-border)] p-8 rounded-[3rem] flex flex-col lg:flex-row items-center justify-center gap-4 shadow-[8px_8px_0px_var(--theme-border)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all">
+                  <span className="text-5xl lg:text-3xl">📨</span>
+                  <span className="text-xs font-black italic uppercase">アンケート送信</span>
+                </button>
+              </Link>
             </div>
 
             {/* --- pal_opt 口コミ自動返信セクション --- */}
