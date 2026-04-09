@@ -44,9 +44,8 @@ function SendSurveyContent() {
   const [sendChannel, setSendChannel] = useState<SendChannel>('sms');
   const [sendRecipients, setSendRecipients] = useState('');
   const [sendMessage, setSendMessage] = useState('');
-  const [messageTitle, setMessageTitle] = useState('');
-  const [targetType, setTargetType] = useState<'new' | 'existing' | 'past'>('existing');
-  const [taste, setTaste] = useState<'aftercare' | 'survey' | 'campaign'>('survey');
+  const [messageSubject, setMessageSubject] = useState('');
+  const [templateType, setTemplateType] = useState<'survey' | 'campaign' | 'aftercare'>('survey');
   const [campaignText, setCampaignText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
@@ -74,7 +73,7 @@ function SendSurveyContent() {
 
   if (authChecking) return null;
 
-  const generateMessage = async (withTitle: boolean) => {
+  const applyTemplate = async () => {
     setIsGenerating(true);
     try {
       const res = await fetch('/api/generate-send-message', {
@@ -82,26 +81,24 @@ function SendSurveyContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId,
-          title: withTitle ? messageTitle : '',
+          templateType,
           channel: sendChannel,
-          targetType,
-          taste,
           campaign: campaignText,
         }),
       });
       const data = await res.json();
       if (res.ok) {
         if (sendChannel === 'email' && data.subject) {
-          setMessageTitle(data.subject);
+          setMessageSubject(data.subject);
           setSendMessage(data.body || '');
         } else {
-          setSendMessage(data.message || data.body || '');
+          setSendMessage(data.message || '');
         }
       } else {
-        showNotice(data.error || 'AI生成に失敗しました', 'error');
+        showNotice(data.error || 'テンプレート適用に失敗しました', 'error');
       }
     } catch {
-      showNotice('AI生成中にエラーが発生しました', 'error');
+      showNotice('テンプレート適用中にエラーが発生しました', 'error');
     } finally {
       setIsGenerating(false);
     }
@@ -130,7 +127,7 @@ function SendSurveyContent() {
       const res = await fetch('/api/send-survey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage, subject: messageTitle }),
+        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage, subject: messageSubject }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -296,91 +293,67 @@ function SendSurveyContent() {
         <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] mb-6">
           <h2 className="text-sm font-black italic uppercase mb-4">送信内容</h2>
 
-          {/* ターゲット・テイスト・キャンペーン */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-            <div>
-              <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">ターゲット</label>
-              <div className="flex gap-2">
-                {([
-                  { key: 'new' as const, label: '新規顧客' },
-                  { key: 'existing' as const, label: '既存顧客' },
-                  { key: 'past' as const, label: '過去顧客' },
-                ]).map((t) => (
-                  <button
-                    key={t.key}
-                    onClick={() => setTargetType(t.key)}
-                    className={`flex-1 py-2 rounded-xl border-2 text-[11px] font-black transition-all ${
-                      targetType === t.key
-                        ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10'
-                        : 'border-[var(--theme-border)]'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">テイスト</label>
-              <div className="flex gap-2">
-                {([
-                  { key: 'aftercare' as const, label: 'アフターフォロー' },
-                  { key: 'survey' as const, label: 'アンケートお願い' },
-                  { key: 'campaign' as const, label: 'キャンペーン風' },
-                ]).map((t) => (
-                  <button
-                    key={t.key}
-                    onClick={() => setTaste(t.key)}
-                    className={`flex-1 py-2 rounded-xl border-2 text-[11px] font-black transition-all ${
-                      taste === t.key
-                        ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10'
-                        : 'border-[var(--theme-border)]'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="mb-5">
-            <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">キャンペーン / お礼内容（任意）</label>
-            <input
-              type="text"
-              value={campaignText}
-              onChange={(e) => setCampaignText(e.target.value)}
-              placeholder="例: アンケート回答で次回10%OFF"
-              className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
-            />
+          {/* テンプレート選択 */}
+          <div className="space-y-3 mb-5">
+            <label className="text-[11px] font-black text-[var(--theme-text)]/60 block">テンプレートを選択</label>
+            {([
+              { key: 'survey' as const, label: '📋 通常版', desc: 'アンケートのお願い — 誠実さを伝えるオーソドックスなスタイル' },
+              { key: 'campaign' as const, label: '🎁 特典あり版', desc: 'キャンペーン告知 — 特典をフックに回答率を最大化' },
+              { key: 'aftercare' as const, label: '💬 アフターフォロー版', desc: 'フォローのついでに依頼 — 気遣いから入る押し付けないスタイル' },
+            ]).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTemplateType(t.key)}
+                className={`w-full text-left p-4 rounded-2xl border-[3px] transition-all ${
+                  templateType === t.key
+                    ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 shadow-[4px_4px_0px_var(--theme-border)]'
+                    : 'border-[var(--theme-border)]'
+                }`}
+              >
+                <span className="text-sm font-black block">{t.label}</span>
+                <span className="text-[11px] text-[var(--theme-text)]/50 block mt-1">{t.desc}</span>
+              </button>
+            ))}
           </div>
 
-          {/* タイトル入力 + AI生成ボタン */}
-          <div className="mb-4">
-            <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">{sendChannel === 'email' ? 'メール件名' : 'タイトル / テーマ'}（任意）</label>
-            <input
-              type="text"
-              value={messageTitle}
-              onChange={(e) => setMessageTitle(e.target.value)}
-              placeholder="例: ご来店ありがとうございました"
-              className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm mb-3"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => generateMessage(true)}
-                disabled={isGenerating || !messageTitle.trim()}
-                className="flex-1 py-3 rounded-xl border-[3px] border-[var(--theme-border)] font-black text-xs shadow-[4px_4px_0px_var(--theme-border)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-40"
-              >
-                {isGenerating ? '生成中...' : '✨ タイトルからAI生成'}
-              </button>
-              <button
-                onClick={() => generateMessage(false)}
-                disabled={isGenerating}
-                className="flex-1 py-3 rounded-xl border-[3px] border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 font-black text-xs shadow-[4px_4px_0px_var(--theme-border)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-40"
-              >
-                {isGenerating ? '生成中...' : '🤖 すべてAI生成'}
-              </button>
+          {/* キャンペーン内容（特典あり版の場合） */}
+          {templateType === 'campaign' && (
+            <div className="mb-5">
+              <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">特典 / お礼内容</label>
+              <input
+                type="text"
+                value={campaignText}
+                onChange={(e) => setCampaignText(e.target.value)}
+                placeholder="例: 次回10%OFFクーポン"
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
+              />
             </div>
+          )}
+
+          {/* テンプレート適用ボタン */}
+          <div className="mb-4">
+            <button
+              onClick={applyTemplate}
+              disabled={isGenerating}
+              className="w-full py-3 rounded-xl border-[3px] border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 font-black text-xs shadow-[4px_4px_0px_var(--theme-border)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-40"
+            >
+              {isGenerating ? '適用中...' : 'テンプレートを適用する'}
+            </button>
           </div>
+
+          {/* メール件名（メール選択時のみ） */}
+          {sendChannel === 'email' && (
+            <div className="mb-3">
+              <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">メール件名</label>
+              <input
+                type="text"
+                value={messageSubject}
+                onChange={(e) => setMessageSubject(e.target.value)}
+                placeholder="件名を入力"
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
+              />
+            </div>
+          )}
 
           {/* メッセージ本文 */}
           <div>
@@ -388,11 +361,11 @@ function SendSurveyContent() {
             <textarea
               value={sendMessage}
               onChange={(e) => setSendMessage(e.target.value)}
-              placeholder="送信する内容を入力、またはAI生成してください"
-              rows={6}
+              placeholder="テンプレートを適用するか、直接入力してください"
+              rows={8}
               className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
             />
-            <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">※ アンケートURLはAI生成時に自動挿入されます</p>
+            <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">※ テンプレート適用後に自由に編集できます</p>
           </div>
         </section>
 
