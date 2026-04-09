@@ -103,9 +103,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: '不明なテンプレートタイプです' }, { status: 400 });
     }
 
-    // 顧客設定を取得
+    // 顧客設定を取得（大文字小文字両方で検索）
     const { rows } = await sql`
-      SELECT data FROM customer_app_settings WHERE customer_id = ${customerId} LIMIT 1;
+      SELECT data FROM customer_app_settings
+      WHERE customer_id = ${customerId} OR customer_id = ${customerId.toLowerCase()} OR customer_id = ${customerId.toUpperCase()}
+      LIMIT 1;
     `;
     const settings = rows[0]?.data?.settings || {};
     const appName = String(settings.sendDisplayName || settings.appName || '');

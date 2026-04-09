@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const { rows } = await sql`
       SELECT data
       FROM customer_app_settings
-      WHERE customer_id = ${customerId}
+      WHERE customer_id = ${customerId} OR customer_id = ${customerId.toLowerCase()} OR customer_id = ${customerId.toUpperCase()}
       LIMIT 1;
     `;
 
