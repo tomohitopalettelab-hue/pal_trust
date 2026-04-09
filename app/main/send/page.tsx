@@ -335,7 +335,10 @@ function SendSurveyContent() {
                   </div>
                 </>
               ) : (
-                <p className="text-sm text-[var(--theme-text)]/50 text-center py-4">「友だちリストを同期」ボタンを押してLINEから取得してください</p>
+                <div className="text-center py-4">
+                <p className="text-sm text-[var(--theme-text)]/50">「友だちリストを同期」ボタンを押してLINEから取得してください</p>
+                <p className="text-[10px] text-[var(--theme-text)]/40 mt-2">※ 友だちリスト同期はLINE認証済みアカウント（青バッジ）またはプレミアムアカウントのみ利用可能です。未認証の場合はWebhook経由で新規友だち追加時に自動蓄積されます。</p>
+              </div>
               )}
             </div>
           )}
