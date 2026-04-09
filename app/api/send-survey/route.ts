@@ -54,22 +54,30 @@ async function sendSms(settings: Record<string, unknown>, to: string, message: s
   });
 }
 
-// --- Email via Resend ---
-async function sendEmail(to: string, subject: string, bodyText: string) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) throw new Error('RESEND_API_KEYが環境変数に設定されていません');
-  const { Resend } = await import('resend');
-  const resend = new Resend(apiKey);
+// --- Email via Gmail API ---
+async function sendGmail(customerId: string, to: string, subject: string, bodyText: string) {
+  const { getAuthenticatedClient } = await import('@/app/api/_lib/google-auth');
+  const client = await getAuthenticatedClient(customerId);
+  if (!client) throw new Error('Gmail連携が必要です。設定画面からGoogleアカウントを連携してください。');
+
+  const { google } = await import('googleapis');
+  const gmail = google.gmail({ version: 'v1', auth: client });
+
   const htmlBody = bodyText.split('\n').map((line) => `<p>${line || '&nbsp;'}</p>`).join('');
-  const result = await resend.emails.send({
-    from: process.env.RESEND_FROM_EMAIL || 'Pal Trust <noreply@palette-lab.com>',
-    to,
-    subject,
-    html: htmlBody,
+  const message = [
+    `To: ${to}`,
+    `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=UTF-8',
+    '',
+    htmlBody,
+  ].join('\r\n');
+
+  const encodedMessage = Buffer.from(message).toString('base64url');
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw: encodedMessage },
   });
-  if (result.error) {
-    throw new Error(result.error.message || 'Resend送信エラー');
-  }
 }
 
 // --- LINE Broadcast ---
@@ -151,7 +159,7 @@ export async function POST(request: Request) {
       }
       for (const to of recipients) {
         try {
-          await sendEmail(to, emailSubject, defaultMessage);
+          await sendGmail(customerId, to, emailSubject, defaultMessage);
           await recordSend(customerId, 'email', to);
           sentCount++;
         } catch (err) {

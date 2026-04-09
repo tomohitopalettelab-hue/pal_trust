@@ -70,6 +70,8 @@ function AdminDashboardContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState('');
   const [customerActive, setCustomerActive] = useState<boolean | null>(null);
   const { notice, showNotice, clearNotice } = useNotice();
 
@@ -142,6 +144,18 @@ function AdminDashboardContent() {
     }
     loadSettings();
   }, [authChecking, customerId, customerActive]);
+
+  // Google連携ステータス取得
+  useEffect(() => {
+    if (!customerId) return;
+    fetch(`/api/google/auth?action=status&customerId=${encodeURIComponent(customerId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        setGoogleConnected(Boolean(d.connected));
+        setGoogleEmail(d.email || '');
+      })
+      .catch(() => {});
+  }, [customerId]);
 
   const addSurveyItem = () => {
     if (surveyItems.length < 20) {
@@ -576,6 +590,37 @@ function AdminDashboardContent() {
             onChange={(e) => setSettings({ ...settings, thanksPageContent: e.target.value })}
             className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold outline-none resize-none"
           />
+        </section>
+
+        {/* Google連携 */}
+        <section className="bg-[var(--theme-card-bg)] border-3 border-[var(--theme-border)] rounded-[2rem] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
+          <h2 className="text-xl font-black italic mb-4">Gmail連携</h2>
+          <p className="text-xs text-[var(--theme-text)]/60 mb-4">アンケート送信メールをあなたのGmailアカウントから送信できます。</p>
+          {googleConnected ? (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-black text-green-600">連携済み</p>
+                {googleEmail && <p className="text-xs text-[var(--theme-text)]/60 mt-1">{googleEmail}</p>}
+              </div>
+              <button
+                onClick={async () => {
+                  await fetch(`/api/google/auth?action=disconnect&customerId=${encodeURIComponent(customerId)}`, { method: 'POST' });
+                  setGoogleConnected(false);
+                  setGoogleEmail('');
+                }}
+                className="px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] text-xs font-black"
+              >
+                連携解除
+              </button>
+            </div>
+          ) : (
+            <a
+              href={`/api/google/auth?customerId=${encodeURIComponent(customerId)}`}
+              className="inline-block bg-[var(--theme-text)] text-[var(--theme-bg)] px-8 py-4 rounded-2xl font-black text-sm shadow-[6px_6px_0px_var(--theme-border)] active:scale-95 transition-all"
+            >
+              Googleアカウントを連携する
+            </a>
+          )}
         </section>
 
         {/* 下部ボタン */}

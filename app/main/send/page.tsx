@@ -54,6 +54,8 @@ function SendSurveyContent() {
   const [selectedLineFriends, setSelectedLineFriends] = useState<string[]>([]);
   const [quotas, setQuotas] = useState<{ sms?: { used: number; limit: number }; email?: { used: number; limit: number } } | null>(null);
   const [lineQuota, setLineQuota] = useState<{ configured: boolean; used?: number; limit?: number } | null>(null);
+  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+  const [gmailEmail, setGmailEmail] = useState('');
 
   useEffect(() => {
     const loggedIn = localStorage.getItem('customerLoggedIn') === 'true';
@@ -69,6 +71,7 @@ function SendSurveyContent() {
     fetch(`/api/send-quota?customerId=${encodeURIComponent(customerId)}`).then((r) => r.json()).then(setQuotas).catch(() => {});
     fetch(`/api/line-quota?customerId=${encodeURIComponent(customerId)}`).then((r) => r.json()).then(setLineQuota).catch(() => {});
     fetch(`/api/line-friends?customerId=${encodeURIComponent(customerId)}`).then((r) => r.json()).then((d) => setLineFriends(d.friends || [])).catch(() => {});
+    fetch(`/api/google/auth?action=status&customerId=${encodeURIComponent(customerId)}`).then((r) => r.json()).then((d) => { setGmailConnected(Boolean(d.connected)); setGmailEmail(d.email || ''); }).catch(() => {});
   }, [authChecking, customerId]);
 
   if (authChecking) return null;
@@ -244,14 +247,28 @@ function SendSurveyContent() {
               className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
             />
           )}
-          {sendChannel === 'email' && (
-            <textarea
-              value={sendRecipients}
-              onChange={(e) => setSendRecipients(e.target.value)}
-              placeholder={"test@example.com\nuser@example.com"}
+          {sendChannel === 'email' && gmailConnected === false && (
+            <div className="text-center py-4">
+              <p className="text-sm font-black text-red-500 mb-2">Gmail連携が必要です</p>
+              <a
+                href={`/main/settings?customerId=${encodeURIComponent(customerId)}`}
+                className="inline-block px-6 py-3 rounded-xl border-[3px] border-[var(--theme-border)] text-xs font-black"
+              >
+                設定画面でGoogleアカウントを連携する →
+              </a>
+            </div>
+          )}
+          {sendChannel === 'email' && gmailConnected !== false && (
+            <div>
+              {gmailEmail && <p className="text-[10px] font-black text-green-600 mb-2">送信元: {gmailEmail}</p>}
+              <textarea
+                value={sendRecipients}
+                onChange={(e) => setSendRecipients(e.target.value)}
+                placeholder={"test@example.com\nuser@example.com"}
               rows={3}
               className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
             />
+            </div>
           )}
           {sendChannel === 'line_broadcast' && (
             <p className="text-sm font-black text-center py-4">友だち全員に送信されます</p>
