@@ -251,42 +251,6 @@ export default function PlatformAdminPage() {
         </header>
 
         <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black italic mb-4">顧客ID / パスワード管理（pal_db同期）</h2>
-
-          <form onSubmit={handleSaveAccount} className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <input
-              type="text"
-              value={newCustomerId}
-              onChange={(e) => setNewCustomerId(e.target.value)}
-              placeholder="顧客ID（Pal Trust契約中のID）"
-              className="bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 font-black outline-none"
-            />
-            <input
-              type="text"
-              value={newCustomerName}
-              onChange={(e) => setNewCustomerName(e.target.value)}
-              placeholder="顧客名"
-              className="bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 font-black outline-none"
-            />
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="password"
-              className="bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 font-black outline-none"
-            />
-            <button
-              type="submit"
-              disabled={savingAccount}
-              className="bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 font-black disabled:opacity-60"
-            >
-              {savingAccount ? 'SAVING...' : 'ID/PWをpal_dbへ保存'}
-            </button>
-          </form>
-
-        </section>
-
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)]">
           <h2 className="text-xl font-black italic mb-4">顧客一覧（main / survey 提供情報）</h2>
 
           <div className="mb-4">

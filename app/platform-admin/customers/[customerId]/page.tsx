@@ -75,6 +75,22 @@ function SendSettingsSection({
     <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] space-y-5">
       <h2 className="text-xl font-black italic">送信設定</h2>
 
+      {/* サービス名 */}
+      <div className="bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl p-4 space-y-2">
+        <label className="space-y-1">
+          <span className="text-[11px] text-[var(--theme-text)]/70">サービス名（メッセージで表示される自社名）</span>
+          <input
+            type="text"
+            value={String(settings.sendDisplayName || '')}
+            onChange={(e) => setField('sendDisplayName', e.target.value)}
+            disabled={!isEditing}
+            placeholder="例: 〇〇美容室"
+            className={inputCls}
+          />
+          <p className="text-[9px] text-[var(--theme-text)]/40">※ SMS送信時に【サービス名】として表示されます</p>
+        </label>
+      </div>
+
       {/* SMS (Twilio) */}
       <div className="bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl p-4 space-y-3">
         <h3 className="text-sm font-black">SMS（Twilio）</h3>

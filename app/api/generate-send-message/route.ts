@@ -108,7 +108,7 @@ export async function POST(req: Request) {
       SELECT data FROM customer_app_settings WHERE customer_id = ${customerId} LIMIT 1;
     `;
     const settings = rows[0]?.data?.settings || {};
-    const appName = String(settings.appName || '');
+    const appName = String(settings.sendDisplayName || settings.appName || '');
 
     const surveyUrl = `https://trust.palette-lab.com/survey?customerId=${encodeURIComponent(customerId)}`;
 
