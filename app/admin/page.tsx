@@ -479,9 +479,21 @@ function OwnerDashboardContent() {
             <p className="text-[10px] md:text-xs font-black text-[var(--theme-primary)] uppercase tracking-widest mt-2 italic">Owner Dashboard</p>
             <p className="text-[10px] font-black text-[var(--theme-text)]/40 uppercase tracking-widest mt-1">Customer: {customerId}</p>
           </div>
-          <div className="text-right hidden sm:block">
-             <p className="text-[10px] font-black text-[var(--theme-text)] opacity-40 italic uppercase">#001 Admin Mode</p>
-             <p className="text-xs font-black text-[var(--theme-text)] italic mt-1">店舗管理センター</p>
+          <div className="flex items-center gap-4">
+            <div className="text-right hidden sm:block">
+              <p className="text-[10px] font-black text-[var(--theme-text)] opacity-40 italic uppercase">Owner Dashboard</p>
+              <p className="text-xs font-black text-[var(--theme-text)] italic mt-1">店舗管理センター</p>
+            </div>
+            <button
+              onClick={() => {
+                localStorage.removeItem('customerLoggedIn');
+                localStorage.removeItem('customerId');
+                router.replace('/main/login');
+              }}
+              className="px-3 py-2 rounded-xl border-2 border-[var(--theme-border)] text-[10px] font-black hover:bg-[var(--theme-text)]/5 transition-colors shrink-0"
+            >
+              ログアウト
+            </button>
           </div>
         </header>
 

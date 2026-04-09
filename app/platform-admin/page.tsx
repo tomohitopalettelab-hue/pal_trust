@@ -244,10 +244,25 @@ export default function PlatformAdminPage() {
         }}
       />
       <div className="max-w-7xl mx-auto space-y-8">
-        <header>
-          <p className="text-xs font-black uppercase tracking-widest text-[var(--theme-text)]/50">Platform Admin</p>
-          <h1 className="text-3xl md:text-4xl font-black italic tracking-tight">顧客別データ管理</h1>
-          <p className="text-sm font-bold text-[var(--theme-text)]/60 mt-2">pal_db連携: Pal Trust契約中の顧客のみ表示されます。</p>
+        <header className="flex items-start justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-[var(--theme-text)]/50">Platform Admin</p>
+            <h1 className="text-3xl md:text-4xl font-black italic tracking-tight">顧客別データ管理</h1>
+            {agencyName && <p className="text-sm font-bold text-[var(--theme-text)]/60 mt-1">{agencyName}</p>}
+          </div>
+          <button
+            onClick={() => {
+              localStorage.removeItem('platformAdminLoggedIn');
+              localStorage.removeItem('platformAdminRole');
+              localStorage.removeItem('platformAdminPaletteId');
+              localStorage.removeItem('platformAdminAccountId');
+              localStorage.removeItem('platformAdminAccountName');
+              router.replace('/platform-admin/login');
+            }}
+            className="px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] text-xs font-black hover:bg-[var(--theme-bg)] transition-colors shrink-0"
+          >
+            ログアウト
+          </button>
         </header>
 
         <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)]">
