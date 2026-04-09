@@ -45,6 +45,7 @@ function SendSurveyContent() {
   const [sendRecipients, setSendRecipients] = useState('');
   const [sendMessage, setSendMessage] = useState('');
   const [messageSubject, setMessageSubject] = useState('');
+  const [isSyncingFriends, setIsSyncingFriends] = useState(false);
   const [templateType, setTemplateType] = useState<'survey' | 'campaign' | 'aftercare'>('survey');
   const [campaignText, setCampaignText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -274,35 +275,69 @@ function SendSurveyContent() {
             <p className="text-sm font-black text-center py-4">友だち全員に送信されます</p>
           )}
           {sendChannel === 'line_push' && (
-            lineFriends.length ? (
-              <div>
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[11px] font-black text-[var(--theme-text)]/60">友だち {lineFriends.length}人</span>
                 <button
-                  onClick={() => setSelectedLineFriends(
-                    selectedLineFriends.length === lineFriends.length ? [] : lineFriends.map((f) => f.line_user_id)
-                  )}
-                  className="text-[10px] font-black text-[var(--theme-primary)] mb-2"
+                  onClick={async () => {
+                    setIsSyncingFriends(true);
+                    try {
+                      const res = await fetch('/api/line-friends', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ customerId }),
+                      });
+                      const data = await res.json();
+                      if (res.ok && data.success) {
+                        showNotice(`${data.syncedCount}人の友だちを同期しました`, 'success');
+                        const friendsRes = await fetch(`/api/line-friends?customerId=${encodeURIComponent(customerId)}`);
+                        const friendsData = await friendsRes.json();
+                        setLineFriends(friendsData.friends || []);
+                      } else {
+                        showNotice(data.error || '同期に失敗しました', 'error');
+                      }
+                    } catch {
+                      showNotice('同期中にエラーが発生しました', 'error');
+                    } finally {
+                      setIsSyncingFriends(false);
+                    }
+                  }}
+                  disabled={isSyncingFriends}
+                  className="px-3 py-1.5 rounded-lg border-2 border-[var(--theme-border)] text-[10px] font-black disabled:opacity-50"
                 >
-                  {selectedLineFriends.length === lineFriends.length ? '全解除' : '全選択'}（{selectedLineFriends.length}人選択中）
+                  {isSyncingFriends ? '同期中...' : '友だちリストを同期'}
                 </button>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {lineFriends.map((f) => (
-                    <label key={f.line_user_id} className="flex items-center gap-3 p-3 rounded-xl border-2 border-[var(--theme-border)] text-sm font-bold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedLineFriends.includes(f.line_user_id)}
-                        onChange={(e) => setSelectedLineFriends((prev) =>
-                          e.target.checked ? [...prev, f.line_user_id] : prev.filter((id) => id !== f.line_user_id)
-                        )}
-                        className="w-4 h-4"
-                      />
-                      {f.display_name || f.line_user_id}
-                    </label>
-                  ))}
-                </div>
               </div>
-            ) : (
-              <p className="text-sm text-[var(--theme-text)]/50 text-center py-4">友だちデータがありません</p>
-            )
+              {lineFriends.length ? (
+                <>
+                  <button
+                    onClick={() => setSelectedLineFriends(
+                      selectedLineFriends.length === lineFriends.length ? [] : lineFriends.map((f) => f.line_user_id)
+                    )}
+                    className="text-[10px] font-black text-[var(--theme-primary)] mb-2"
+                  >
+                    {selectedLineFriends.length === lineFriends.length ? '全解除' : '全選択'}（{selectedLineFriends.length}人選択中）
+                  </button>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {lineFriends.map((f) => (
+                      <label key={f.line_user_id} className="flex items-center gap-3 p-3 rounded-xl border-2 border-[var(--theme-border)] text-sm font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedLineFriends.includes(f.line_user_id)}
+                          onChange={(e) => setSelectedLineFriends((prev) =>
+                            e.target.checked ? [...prev, f.line_user_id] : prev.filter((id) => id !== f.line_user_id)
+                          )}
+                          className="w-4 h-4"
+                        />
+                        {f.display_name || f.line_user_id}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-[var(--theme-text)]/50 text-center py-4">「友だちリストを同期」ボタンを押してLINEから取得してください</p>
+              )}
+            </div>
           )}
         </section>
 
