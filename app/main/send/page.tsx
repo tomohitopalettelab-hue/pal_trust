@@ -45,6 +45,8 @@ function SendSurveyContent() {
   const [sendRecipients, setSendRecipients] = useState('');
   const [sendMessage, setSendMessage] = useState('');
   const [messageSubject, setMessageSubject] = useState('');
+  const [emailHtml, setEmailHtml] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
   const [isSyncingFriends, setIsSyncingFriends] = useState(false);
   const [templateType, setTemplateType] = useState<'survey' | 'campaign' | 'aftercare'>('survey');
   const [campaignText, setCampaignText] = useState('');
@@ -95,8 +97,10 @@ function SendSurveyContent() {
         if (sendChannel === 'email' && data.subject) {
           setMessageSubject(data.subject);
           setSendMessage(data.body || '');
+          setEmailHtml(data.html || '');
         } else {
           setSendMessage(data.message || '');
+          setEmailHtml('');
         }
       } else {
         showNotice(data.error || 'テンプレート適用に失敗しました', 'error');
@@ -131,7 +135,7 @@ function SendSurveyContent() {
       const res = await fetch('/api/send-survey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage, subject: messageSubject }),
+        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage, subject: messageSubject, html: emailHtml || undefined }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -422,6 +426,27 @@ function SendSurveyContent() {
             />
             <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">※ テンプレート適用後に自由に編集できます</p>
           </div>
+
+          {/* メールプレビュー */}
+          {sendChannel === 'email' && emailHtml && (
+            <div className="mt-4">
+              <button
+                onClick={() => setShowPreview(!showPreview)}
+                className="text-[11px] font-black text-[var(--theme-primary)] mb-2"
+              >
+                {showPreview ? '▼ プレビューを閉じる' : '▶ メールプレビューを表示'}
+              </button>
+              {showPreview && (
+                <div className="border-2 border-[var(--theme-border)] rounded-xl overflow-hidden" style={{ height: '500px' }}>
+                  <iframe
+                    srcDoc={emailHtml}
+                    className="w-full h-full border-none"
+                    title="メールプレビュー"
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         {/* 結果表示 */}

@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
+import {
+  surveyEmailHtml, surveyEmailSubject,
+  campaignEmailHtml, campaignEmailSubject,
+  aftercareEmailHtml, aftercareEmailSubject,
+} from '@/app/api/_lib/email-templates';
 
 type TemplateType = 'survey' | 'campaign' | 'aftercare';
 type Channel = 'sms' | 'email' | 'line_broadcast' | 'line_push';
@@ -126,9 +131,23 @@ export async function POST(req: Request) {
     const isLine = channel === 'line_broadcast' || channel === 'line_push';
 
     if (isEmail) {
+      const templateVars = { companyName: appName, surveyUrl, campaign: campaign || '' };
+      let emailHtml = '';
+      let emailSubject = '';
+      if (templateType === 'survey') {
+        emailHtml = surveyEmailHtml(templateVars);
+        emailSubject = surveyEmailSubject();
+      } else if (templateType === 'campaign') {
+        emailHtml = campaignEmailHtml(templateVars);
+        emailSubject = campaignEmailSubject(campaign);
+      } else {
+        emailHtml = aftercareEmailHtml(templateVars);
+        emailSubject = aftercareEmailSubject(appName);
+      }
       return NextResponse.json({
-        subject: replacePlaceholders(template.email.subject, vars),
+        subject: emailSubject,
         body: replacePlaceholders(template.email.body, vars),
+        html: emailHtml,
       });
     }
 

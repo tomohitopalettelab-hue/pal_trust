@@ -8,6 +8,7 @@ type SendRequest = {
   recipients: string[];
   message?: string;
   subject?: string;
+  html?: string;
 };
 
 const SMS_MONTHLY_LIMIT = 100;
@@ -55,7 +56,7 @@ async function sendSms(settings: Record<string, unknown>, to: string, message: s
 }
 
 // --- Email via Gmail API ---
-async function sendGmail(customerId: string, to: string, subject: string, bodyText: string) {
+async function sendGmail(customerId: string, to: string, subject: string, bodyText: string, htmlTemplate?: string) {
   const { getAuthenticatedClient } = await import('@/app/api/_lib/google-auth');
   const client = await getAuthenticatedClient(customerId);
   if (!client) throw new Error('Gmail連携が必要です。設定画面からGoogleアカウントを連携してください。');
@@ -63,7 +64,8 @@ async function sendGmail(customerId: string, to: string, subject: string, bodyTe
   const { google } = await import('googleapis');
   const gmail = google.gmail({ version: 'v1', auth: client });
 
-  const htmlBody = bodyText.split('\n').map((line) => `<p>${line || '&nbsp;'}</p>`).join('');
+  // HTMLテンプレートがあればそれを使用、なければプレーンテキストをHTML変換
+  const htmlBody = htmlTemplate || bodyText.split('\n').map((line) => `<p>${line || '&nbsp;'}</p>`).join('');
   const message = [
     `To: ${to}`,
     `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
@@ -131,6 +133,7 @@ export async function POST(request: Request) {
     const surveyUrl = buildSurveyUrl(customerId);
     const defaultMessage = body.message || `アンケートにご協力ください！\n${surveyUrl}`;
     const emailSubject = body.subject || 'アンケートのお願い';
+    const emailHtml = body.html || '';
 
     let sentCount = 0;
     const errors: string[] = [];
@@ -159,7 +162,7 @@ export async function POST(request: Request) {
       }
       for (const to of recipients) {
         try {
-          await sendGmail(customerId, to, emailSubject, defaultMessage);
+          await sendGmail(customerId, to, emailSubject, defaultMessage, emailHtml || undefined);
           await recordSend(customerId, 'email', to);
           sentCount++;
         } catch (err) {
