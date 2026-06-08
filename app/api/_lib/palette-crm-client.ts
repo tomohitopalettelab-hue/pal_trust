@@ -1,3 +1,5 @@
+import { palDbPost } from './pal-db-client';
+
 const getCanvasUrl = (): string =>
   process.env.PALETTE_CANVAS_URL?.trim() || 'https://palettecrm.vercel.app';
 
@@ -41,12 +43,19 @@ export const findCrmCustomerByLoginId = async (loginId: string): Promise<CrmCust
 };
 
 export const verifyCrmLogin = async (loginId: string, password: string): Promise<CrmCustomer | null> => {
-  const customers = await listCrmCustomers();
-  return customers.find(
-    (c) =>
-      String(c.loginId || '') === loginId &&
-      String(c.loginPassword || '') === password
-  ) || null;
+  // 認証は palette_crm の verify-chat-login（scrypt ハッシュ照合）に委譲。
+  // pal_trust 側で平文パスワードを取得・比較しない。
+  let res: Response;
+  try {
+    res = await palDbPost('/api/verify-chat-login', { id: loginId, password });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!data?.success) return null;
+  // 認証成功 → 顧客データ（パスワード以外）を取得して返す
+  return await findCrmCustomerByLoginId(loginId);
 };
 
 // --- Contracts / Products ---
