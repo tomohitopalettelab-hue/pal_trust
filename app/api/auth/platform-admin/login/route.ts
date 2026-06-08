@@ -11,8 +11,9 @@ export async function POST(request: Request) {
 
     // --- 0. 管理者チェック ---
     const adminId = process.env.PLATFORM_ADMIN_LOGIN_ID || 'tomohito0108';
-    const adminPw = process.env.PLATFORM_ADMIN_PASSWORD || process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '';
-    if (loginId === adminId && password === adminPw) {
+    // NEXT_PUBLIC_* はクライアント露出するため使わない。未設定なら空→ログイン不可(fail-closed)。
+    const adminPw = process.env.PLATFORM_ADMIN_PASSWORD || '';
+    if (loginId === adminId && adminPw && password === adminPw) {
       return NextResponse.json({
         ok: true,
         role: 'admin',
