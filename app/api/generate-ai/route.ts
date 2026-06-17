@@ -1,129 +1,264 @@
 import { NextResponse } from "next/server";
+import { checkDemoRateLimit, getClientIp } from "../_lib/rate-limit";
 
 type SurveyItem = {
-    id: number | string;
-    text: string;
-    type: string;
+  id: number | string;
+  text: string;
+  type: string;
 };
 
 type GenerateAiRequestBody = {
-    answers?: Record<string, string | number>;
-    surveyItems?: SurveyItem[];
-    settings?: {
-        aiReviewTaste?: string;
-        aiReviewLength?: string | number;
-        industry?: string;
-    };
+  answers?: Record<string, string | number | string[]>;
+  surveyItems?: SurveyItem[];
+  settings?: {
+    aiReviewTaste?: string;
+    aiReviewLength?: string | number;
+    aiUseEmoji?: boolean;
+    aiBannedWords?: string;
+    aiPreferredWords?: string;
+    industry?: string;
+  };
 };
 
+type OpenAIChoice = { message?: { content?: string } };
 type OpenAIResponse = {
-    choices?: Array<{ message?: { content?: string } }>;
-    error?: { message?: string };
+  choices?: OpenAIChoice[];
+  error?: { message?: string };
+};
+
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const MODEL = "gpt-4o";
+
+const tasteMap: Record<string, string> = {
+  friendly: "親しみやすく柔らかい敬語（〜でした！、〜ですね、〜してもらえました！など。ため口は禁止）",
+  polite: "丁寧で誠実な、しっかりした敬語（〜でございます、感謝しております等）",
+  energetic: "元気でポジティブな敬語（！を多用しつつも「〜でした！」「〜です！」など丁寧語を維持。ため口は禁止）",
+  emotional: "感動が伝わるような心温まる敬語（感動しました、心に残りました等）",
+  minimal: "短く端的に良さを伝える敬語（〜でした。また伺います。等。ため口は禁止）",
+};
+
+const lengthRangeMap: Record<string, { range: string; min: number; max: number }> = {
+  short: { range: '80〜120文字', min: 80, max: 120 },
+  medium: { range: '150〜200文字', min: 150, max: 200 },
+  long: { range: '250〜350文字', min: 250, max: 350 },
+};
+
+const parseList = (raw: string | undefined): string[] => {
+  if (!raw) return [];
+  return raw.split(/[,，、\n]/).map((s) => s.trim()).filter(Boolean);
+};
+
+const formatAnswerVal = (v: unknown): string => {
+  if (v == null) return '';
+  if (Array.isArray(v)) return v.map((x) => String(x)).filter(Boolean).join('、');
+  return String(v);
+};
+
+const buildContext = (answers: Record<string, string | number | string[]>, surveyItems: SurveyItem[]): string => {
+  const lines: string[] = [];
+  surveyItems.forEach((item) => {
+    const ans = answers[String(item.id)];
+    if (!ans && ans !== 0) return;
+    const text = formatAnswerVal(ans);
+    if (!text) return;
+    if (item.type === 'rating') {
+      lines.push(`- ${item.text}: ★${text}/5`);
+    } else if (item.type === 'free') {
+      // 自由記述は最重要 — 強調
+      lines.push(`★【自由記述】${item.text}\n   お客様の生の声: 「${text}」`);
+    } else {
+      lines.push(`- ${item.text}: ${text}`);
+    }
+  });
+  return lines.join('\n');
+};
+
+const buildPrompt = (params: {
+  taste: string;
+  lengthKey: string;
+  useEmoji: boolean;
+  preferredWords: string[];
+  bannedWords: string[];
+  industry?: string;
+  context: string;
+  variationHint?: string;
+}): { system: string; user: string } => {
+  const { taste, lengthKey, useEmoji, preferredWords, bannedWords, industry, context, variationHint } = params;
+  const lengthInfo = lengthRangeMap[lengthKey] || lengthRangeMap.medium;
+
+  let tasteInstruction = "";
+  if (taste === "random") {
+    tasteInstruction = "今回の回答内容に最も合うテイストを以下から1つ選んで作成：[親しみやすい / 丁寧 / 元気 / 感動的 / シンプル]（必ず敬語）";
+  } else if (taste in tasteMap) {
+    tasteInstruction = tasteMap[taste];
+  } else {
+    tasteInstruction = tasteMap.friendly;
+  }
+
+  const system = `あなたは「実際にこのお店を利用したお客様本人」として、Googleマップに投稿する自然な口コミを書くプロのライターです。
+
+【絶対遵守ルール】
+1. お客様本人の一人称視点（「私」「自分」など）で書く。第三者・お店側の視点は厳禁
+2. 必ず敬語（です・ます調）。ため口・タメ語は絶対禁止
+3. 高評価のお客様の口コミなので、ポジティブな内容のみ
+4. AI臭・テンプレ感のある定型文は避け、人間味のある自然な文章にする
+5. 業種名・サービス名から書き始めない。具体的な体験から自然に始める
+6. 点数・評点（「5点満点」「満足度5」等）は直接書かない。「とても満足」など自然に表現
+7. 文字数: ${lengthInfo.range}（厳守）
+8. ${useEmoji ? '絵文字を1〜3個、自然な位置に挿入してOK（使いすぎない）' : '絵文字は使わない'}`;
+
+  const preferredSection = preferredWords.length > 0
+    ? `\n【積極的に使う表現】\n${preferredWords.map((w) => `- 「${w}」`).join('\n')}\n※ 上記の言葉を可能な範囲で文章に自然に取り込む（無理矢理は不可）`
+    : '';
+
+  const bannedSection = bannedWords.length > 0
+    ? `\n【絶対に使わない言葉】\n${bannedWords.map((w) => `- 「${w}」`).join('、')}`
+    : '';
+
+  const industrySection = industry
+    ? `\n【店舗の業種】\n${industry}\n※業種に合った自然な表現・用語を使う`
+    : '';
+
+  const user = `【テイスト】\n${tasteInstruction}\n${industrySection}${preferredSection}${bannedSection}
+
+【アンケート回答内容】
+${context}
+
+${variationHint ? `\n【今回のバリエーション指示】\n${variationHint}\n` : ''}
+【重要】
+・自由記述（★マーク付き）はお客様の生の声なので、可能な限り内容や表現を活かす
+・全質問を均等に取り上げる必要はなく、特に印象に残った点を中心に書く
+・「特に印象に残った点はない」等のネガティブ・中立表現は禁止
+
+【出力】
+口コミ文章のみを出力。前置き・後書き・「」記号は不要。`;
+
+  return { system, user };
+};
+
+const callOpenAI = async (system: string, user: string, opts: { temperature?: number; presence?: number; frequency?: number } = {}): Promise<string> => {
+  const res = await fetch(OPENAI_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: opts.temperature ?? 0.85,
+      presence_penalty: opts.presence ?? 0.6,
+      frequency_penalty: opts.frequency ?? 0.3,
+    }),
+  });
+  const data = (await res.json()) as OpenAIResponse;
+  if (!res.ok) {
+    throw new Error(data.error?.message || "OpenAI APIとの通信に失敗しました");
+  }
+  return data.choices?.[0]?.message?.content?.trim() || '';
+};
+
+// 自己評価＆ブラッシュアップ
+const refineComment = async (originalComment: string, lengthKey: string): Promise<string> => {
+  const lengthInfo = lengthRangeMap[lengthKey] || lengthRangeMap.medium;
+  const system = `あなたは口コミ文章のレビュアーです。以下の口コミを、お客様本人が実際に書いた文章として違和感がないか厳しくチェックし、必要なら自然に書き直してください。`;
+  const user = `【チェック観点】
+1. AI生成っぽい定型文・お決まりフレーズ（「素晴らしい体験でした」「心温まるサービス」等の使い回し）になっていないか
+2. お客様本人の一人称視点で書かれているか（お店側の視点が混じっていないか）
+3. 全体が敬語で統一されているか
+4. 文字数が${lengthInfo.range}に収まっているか（超過/不足は調整）
+5. ネガティブな表現が紛れていないか
+
+【元の口コミ】
+${originalComment}
+
+【出力】
+問題があれば自然に書き直した最終版の口コミ文章のみを出力。前置き・「」記号不要。問題なければそのまま出力。`;
+
+  try {
+    const refined = await callOpenAI(system, user, { temperature: 0.6, presence: 0.3, frequency: 0.2 });
+    return refined || originalComment;
+  } catch {
+    return originalComment;
+  }
 };
 
 export async function POST(req: Request) {
-    try {
-        const body = (await req.json()) as GenerateAiRequestBody;
-        const answers = body.answers || {};
-        const surveyItems = Array.isArray(body.surveyItems) ? body.surveyItems : [];
-        const settings = body.settings || {};
-
-        // 1. 回答内容をテキストにまとめる
-        const context = surveyItems.map((item) => {
-            const ans = answers[String(item.id)];
-            if (!ans) return null;
-            return `質問: ${item.text} / 回答: ${ans}${item.type === 'rating' ? '点' : ''}`;
-        }).filter(Boolean).join("\n");
-
-        // --- 2. テイストに応じた具体的な指示 ---
-        const tasteMap: Record<string, string> = {
-            friendly: "親しみやすく柔らかい敬語（〜でした！、〜ですね、〜してもらえました！など。ため口は禁止）",
-            polite: "丁寧で誠実な、しっかりした敬語（〜でございます、感謝しております等）",
-            energetic: "元気でポジティブな敬語（！を多用しつつも「〜でした！」「〜です！」など丁寧語を維持。ため口は禁止）",
-            emotional: "感動が伝わるような心温まる敬語（感動しました、心に残りました等）",
-            minimal: "短く端的に良さを伝える敬語（〜でした。また伺います。等。ため口は禁止）",
-        };
-
-        let selectedTasteInstruction = "";
-        if (settings?.aiReviewTaste === "random") {
-            selectedTasteInstruction = "以下の5つのテイストから、今回の回答内容に最も合うものを1つAIが選び、その口調で作成してください：[親しみやすい, 丁寧, 元気, 感動的, シンプル]（※どのテイストでも必ず敬語を使うこと）";
-        } else {
-            const selectedTasteKey = settings?.aiReviewTaste;
-            selectedTasteInstruction = selectedTasteKey && selectedTasteKey in tasteMap
-                ? tasteMap[selectedTasteKey]
-                : tasteMap.friendly;
-        }
-
-        // --- 3. AIへの命令書（プロンプト） ---
-        const prompt = `
-あなたは「実際にこのお店を利用したお客様本人」として、Googleマップの口コミを書いてください。
-以下のアンケート回答は、お客様が実体験に基づいて答えたものです。この回答内容を元に、お客様自身の言葉として自然な口コミを作成してください。
-
-【最重要ルール】
-・必ず「お客様本人が書いた文章」として書くこと。第三者やお店側の視点は絶対にNG。
-・「〜してもらいました」「〜していただきました」「〜に行きました」など、お客様が体験を語る表現を使うこと。
-・「お客様に〜」「ご来店いただき〜」「当店では〜」などお店側の表現は絶対に使わないこと。
-・「おすすめです」「また行きたいです」など、他の人に薦める・自分がまた行きたいという気持ちを自然に含めてOK。
-・【敬語必須】どのテイストであっても、必ず敬語（です・ます調）で書くこと。「〜だよ」「〜だった」「〜してくれた」などのため口は絶対に使わないこと。
-
-【制約事項】
-・口調: ${selectedTasteInstruction}
-・文字数目安: ${settings?.aiReviewLength || "150"}文字程度
-・構成: アンケートで具体的に触れられている点（回答内容）を必ず盛り込んでください。
-・禁止: AIが書いたとバレるような定型文（「素晴らしい体験でした」「心温まるサービス」の多用など）は避け、人間味のある文章にしてください。
-・禁止: 全ての回答を均等に取り上げる必要はありません。特に印象に残った点を中心に書いてください。
-・禁止: 「特に印象に残った点はありませんでした」「特筆すべき点はない」等のネガティブ・中立的な表現は絶対に使わないこと。高評価のお客様の口コミなので、必ずポジティブな内容だけで構成すること。
-・禁止: 文章の冒頭に業種名やサービス名（例:「WEBマーケティングの〜」「美容室の〜」）を入れないこと。いきなり業種名から始まる口コミは不自然です。具体的な体験やきっかけから自然に書き始めてください。
-・禁止: 「満足度は5点です」「〇点をつけました」「5点満点で〜」など、点数や評点を直接記載しないこと。満足度の高さは「とても満足しています」「大変良かったです」など自然な表現で伝えてください。
-
-${settings?.industry ? `【店舗の業種】\n${settings.industry}\n※この業種に合った自然な表現・用語を使ってください。\n` : ''}【アンケート回答】
-${context}
-
-【出力ルール】
-・文章のみを出力してください。
-・「」などの記号は不要です。
-・最終チェック: 出力前に「この文章はお客様本人が書いたように読めるか？」を確認してください。
-`;
-
-        // OpenAI API 呼び出し
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.7,
-            }),
-        });
-
-        const data = (await response.json()) as OpenAIResponse;
-
-        // --- 修正ポイント：エラーハンドリングの強化 ---
-        if (!response.ok) {
-            console.error("OpenAI API Error Details:", data);
-            throw new Error(data.error?.message || "OpenAI APIとの通信に失敗しました");
-        }
-
-        if (!data.choices || data.choices.length === 0) {
-            throw new Error("AIからの回答が空でした。");
-        }
-
-        const aiText = data.choices?.[0]?.message?.content || '';
-        if (!aiText) {
-            throw new Error('AIからの回答が空でした。');
-        }
-        return NextResponse.json({ comment: aiText });
-
-    } catch (error: unknown) {
-        console.error("AI API Error:", error);
-        const message = error instanceof Error ? error.message : '不明なエラー';
-        // クライアント側へ具体的なエラー理由を（開発中は特に）返すと原因がすぐわかります
-        return NextResponse.json(
-            { comment: `文章の生成に失敗しました (${message})` }, 
-            { status: 500 }
-        );
+  try {
+    // 公開・無認証エンドポイントのため、IP 単位で1時間あたりの生成回数を制限し
+    // OpenAI の過剰消費（不正利用）を防ぐ。1回の生成で複数回の API 呼び出しが走る。
+    const ip = getClientIp(req);
+    const rl = await checkDemoRateLimit('generate-ai', ip);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'ご利用が混み合っています。しばらく時間をおいてからお試しください。', variants: [] },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+      );
     }
+
+    const body = (await req.json()) as GenerateAiRequestBody;
+    const answers = body.answers || {};
+    const surveyItems = Array.isArray(body.surveyItems) ? body.surveyItems : [];
+    const settings = body.settings || {};
+
+    const context = buildContext(answers, surveyItems);
+    const lengthKey = String(settings.aiReviewLength || 'medium');
+    const taste = String(settings.aiReviewTaste || 'friendly');
+    const useEmoji = Boolean(settings.aiUseEmoji);
+    const preferredWords = parseList(settings.aiPreferredWords);
+    const bannedWords = parseList(settings.aiBannedWords);
+    const industry = settings.industry;
+
+    // 3案を異なるバリエーション指示で並行生成
+    const variations = [
+      { hint: "1案目：オーソドックスで読みやすい、王道スタイル", temperature: 0.75 },
+      { hint: "2案目：少し情緒的で、感情の動きを丁寧に描写するスタイル", temperature: 0.95 },
+      { hint: "3案目：具体的なエピソードや細かいディテールを盛り込むスタイル", temperature: 0.85 },
+    ];
+
+    const variants = await Promise.all(
+      variations.map(async (v) => {
+        const { system, user } = buildPrompt({
+          taste,
+          lengthKey,
+          useEmoji,
+          preferredWords,
+          bannedWords,
+          industry,
+          context,
+          variationHint: v.hint,
+        });
+        try {
+          const draft = await callOpenAI(system, user, { temperature: v.temperature });
+          // 自己評価ループでブラッシュアップ
+          const refined = await refineComment(draft, lengthKey);
+          return refined;
+        } catch (e) {
+          console.error('variation error:', e);
+          return '';
+        }
+      })
+    );
+
+    const results = variants.filter((v) => v && v.length > 20);
+
+    if (results.length === 0) {
+      return NextResponse.json(
+        { error: 'AI生成に失敗しました。再度お試しください。', variants: [] },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ variants: results });
+  } catch (error: unknown) {
+    console.error("AI API Error:", error);
+    const message = error instanceof Error ? error.message : '不明なエラー';
+    return NextResponse.json(
+      { error: message, variants: [] },
+      { status: 500 }
+    );
+  }
 }
