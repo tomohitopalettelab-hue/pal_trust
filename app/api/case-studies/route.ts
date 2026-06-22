@@ -37,11 +37,13 @@ type CaseItem = {
 };
 
 async function buildItem(customerId: string, industry: string, companyName: string): Promise<CaseItem> {
+  // surveys.category / survey_funnel_events.customer_id は大文字で保存される一方、
+  // customer_app_settings.customer_id は元の表記（混在）のため、大文字小文字を無視して一致させる。
   const [totalRes, avgRes, startedRes, clickedRes] = await Promise.all([
-    sql`SELECT COUNT(*)::int AS c FROM surveys WHERE category = ${customerId}`,
-    sql`SELECT AVG(rating) AS a FROM surveys WHERE category = ${customerId} AND rating IS NOT NULL`,
-    sql`SELECT COUNT(*)::int AS c FROM survey_funnel_events WHERE customer_id = ${customerId}`,
-    sql`SELECT COUNT(*)::int AS c FROM survey_funnel_events WHERE customer_id = ${customerId} AND review_clicked_at IS NOT NULL`,
+    sql`SELECT COUNT(*)::int AS c FROM surveys WHERE UPPER(category) = UPPER(${customerId})`,
+    sql`SELECT AVG(rating) AS a FROM surveys WHERE UPPER(category) = UPPER(${customerId}) AND rating IS NOT NULL`,
+    sql`SELECT COUNT(*)::int AS c FROM survey_funnel_events WHERE UPPER(customer_id) = UPPER(${customerId})`,
+    sql`SELECT COUNT(*)::int AS c FROM survey_funnel_events WHERE UPPER(customer_id) = UPPER(${customerId}) AND review_clicked_at IS NOT NULL`,
   ]);
   const totalResponses = Number(totalRes.rows[0]?.c || 0);
   const avgRaw = avgRes.rows[0]?.a;
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
                cs.data->'settings'->>'caseUsable' AS case_usable,
                ca.customer_name
         FROM customer_app_settings cs
-        LEFT JOIN customer_accounts ca ON ca.customer_id = cs.customer_id
+        LEFT JOIN customer_accounts ca ON UPPER(ca.customer_id) = UPPER(cs.customer_id)
         WHERE cs.customer_id = ${cid} LIMIT 1`;
       const r = rows[0];
       if (!r || String(r.case_usable) !== "true") {
@@ -88,7 +90,7 @@ export async function GET(req: NextRequest) {
     const { rows } = await sql`
       SELECT cs.customer_id, cs.data->'settings'->>'industry' AS industry, ca.customer_name
       FROM customer_app_settings cs
-      LEFT JOIN customer_accounts ca ON ca.customer_id = cs.customer_id
+      LEFT JOIN customer_accounts ca ON UPPER(ca.customer_id) = UPPER(cs.customer_id)
       WHERE cs.data->'settings'->>'caseUsable' = 'true'`;
     const items = await Promise.all(
       rows.map((r) => buildItem(String(r.customer_id), String(r.industry || ""), String(r.customer_name || ""))),
