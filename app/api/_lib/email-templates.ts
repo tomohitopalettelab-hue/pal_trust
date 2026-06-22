@@ -4,6 +4,7 @@ type TemplateVars = {
   companyName: string;
   surveyUrl: string;
   campaign?: string;
+  headerImageUrl?: string;
 };
 
 function wrapHtml(content: string, vars: TemplateVars): string {
@@ -19,6 +20,11 @@ function wrapHtml(content: string, vars: TemplateVars): string {
         <tr>
             <td align="center">
                 <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+${vars.headerImageUrl ? `                    <tr>
+                        <td align="center" style="padding: 0; line-height: 0;">
+                            <img src="${vars.headerImageUrl}" alt="" width="600" style="width: 100%; max-width: 600px; height: auto; display: block;" />
+                        </td>
+                    </tr>` : ''}
 ${content}
                     <tr>
                         <td style="padding: 30px; background-color: #f8f8f8; text-align: center; border-top: 1px solid #eeeeee;">

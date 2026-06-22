@@ -41,18 +41,41 @@ function buildSurveyUrl(customerId: string): string {
   return `${base}/survey?customerId=${encodeURIComponent(customerId)}`;
 }
 
-// --- SMS via Twilio ---
+// --- SMS via Vonage ---
+function normalizeJpPhone(raw: string): string {
+  // 数字だけ残す
+  let num = raw.replace(/[^0-9+]/g, '');
+  // 先頭の+81はそのまま（+除去して81始まりに）
+  if (num.startsWith('+81')) num = '81' + num.slice(3);
+  // 先頭の0を81に変換（070→8170, 080→8180, 090→8190）
+  if (num.startsWith('0')) num = '81' + num.slice(1);
+  return num;
+}
+
 async function sendSms(settings: Record<string, unknown>, to: string, message: string) {
-  const Twilio = (await import('twilio')).default;
-  const client = Twilio(
-    String(settings.twilioAccountSid || ''),
-    String(settings.twilioAuthToken || ''),
-  );
-  await client.messages.create({
-    body: message,
-    from: String(settings.twilioPhoneNumber || ''),
-    to,
+  const apiKey = String(settings.vonageApiKey || '');
+  const apiSecret = String(settings.vonageApiSecret || '');
+  const senderName = String(settings.sendDisplayName || settings.appName || 'PAL-TRUST');
+  const toNum = normalizeJpPhone(to);
+
+  // REST APIを直接呼び出し（Unicode対応）
+  const res = await fetch('https://rest.nexmo.com/sms/json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: apiKey,
+      api_secret: apiSecret,
+      from: senderName,
+      to: toNum,
+      text: message,
+      type: 'unicode',
+    }),
   });
+  const data = await res.json();
+  const msg = data.messages?.[0];
+  if (msg?.status !== '0') {
+    throw new Error(msg?.['error-text'] || 'SMS送信に失敗しました');
+  }
 }
 
 // --- Email via Gmail API ---
@@ -139,8 +162,8 @@ export async function POST(request: Request) {
     const errors: string[] = [];
 
     if (channel === 'sms') {
-      if (!settings.twilioAccountSid || !settings.twilioAuthToken || !settings.twilioPhoneNumber) {
-        return NextResponse.json({ error: 'Twilio設定が未完了です' }, { status: 400 });
+      if (!settings.vonageApiKey || !settings.vonageApiSecret) {
+        return NextResponse.json({ error: 'Vonage SMS設定が未完了です。設定画面からAPI KeyとAPI Secretを登録してください。' }, { status: 400 });
       }
       const used = await getMonthlyCount(customerId, 'sms');
       if (used + recipients.length > SMS_MONTHLY_LIMIT) {

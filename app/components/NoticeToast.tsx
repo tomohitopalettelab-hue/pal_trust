@@ -22,17 +22,17 @@ export default function NoticeToast({ message, variant = 'success', onClose }: N
   const icon = isError ? '⚠' : isInfo ? 'ℹ' : '✓';
 
   return (
-    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top-2 duration-200">
+    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] w-[92vw] max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
       <div
-        className={`max-w-[90vw] px-5 py-3 rounded-2xl border-2 border-[var(--theme-border)] shadow-[6px_6px_0px_var(--theme-border)] font-black text-sm ${toneClass}`}
+        className={`w-full px-5 py-3 rounded-2xl border-2 border-[var(--theme-border)] shadow-[var(--theme-shadow-md)] font-black text-sm ${toneClass}`}
       >
         <div className="flex items-center gap-3">
-          <span>{icon}</span>
-          <p>{message}</p>
+          <span className="shrink-0">{icon}</span>
+          <p className="flex-1 leading-snug">{message}</p>
           <button
             type="button"
             onClick={onClose}
-            className="ml-2 text-xs font-black opacity-70 hover:opacity-100"
+            className="shrink-0 text-xs font-black opacity-70 hover:opacity-100"
             aria-label="閉じる"
           >
             CLOSE

@@ -108,7 +108,8 @@ export async function GET(
       sql<SettingRow>`
         SELECT data, updated_at::text
         FROM customer_app_settings
-        WHERE customer_id = ${canonicalCustomerId}
+        WHERE LOWER(customer_id) = LOWER(${canonicalCustomerId})
+        ORDER BY (customer_id = ${canonicalCustomerId}) DESC, updated_at DESC
         LIMIT 1;
       `,
       sql<SurveyRow>`

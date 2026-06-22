@@ -1,8 +1,9 @@
 export const getPalDbBaseUrl = (): string => {
   const configured = process.env.PAL_DB_BASE_URL?.trim();
   if (configured) return configured;
+  // standalone pal-db.onrender.com は廃止済み。未設定時は palette_crm プロキシへ。
   return process.env.NODE_ENV === 'production'
-    ? 'https://pal-db.onrender.com'
+    ? 'https://palettecrm.vercel.app/api/pal-db'
     : 'http://localhost:3100';
 };
 

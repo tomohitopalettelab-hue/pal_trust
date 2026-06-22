@@ -1,6 +1,7 @@
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
 import { listTrustAccountsFromPalDb } from '@/app/api/_lib/pal-trust-accounts';
+import { listCrmCustomers } from '@/app/api/_lib/palette-crm-client';
 import { ensureSurveysTable } from '@/app/api/_lib/ensure-surveys-table';
 
 type ListRow = {
@@ -76,11 +77,14 @@ export async function GET(request: Request) {
     // agencyPaletteIdが指定されている場合、agencyIdでフィルタ
     if (agencyPaletteId) {
       // ログインした代理店のaccountIdを特定
-      const agencyAccount = trustAccounts.find(
-        (a) => String(a.paletteId || '').toUpperCase() === agencyPaletteId.toUpperCase()
-          || String(a.chatLoginId || '').toUpperCase() === agencyPaletteId.toUpperCase()
+      // 注意: 代理店自身はPal Trust契約を持たないことが多いため、
+      // フィルタ済みのtrustAccountsではなく全CRM顧客から検索する
+      const allCrmCustomers = await listCrmCustomers();
+      const target = agencyPaletteId.trim().toUpperCase();
+      const agencyCustomer = allCrmCustomers.find(
+        (c) => String(c.loginId || '').trim().toUpperCase() === target
       );
-      const agencyAccountId = agencyAccount?.id || '';
+      const agencyAccountId = agencyCustomer?.id || '';
 
       // agencyIdが一致する顧客のみ（代理店自身は除外）
       trustAccounts = trustAccounts.filter(

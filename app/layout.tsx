@@ -7,10 +7,10 @@ import ThemeProvider from "./components/ThemeProvider";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Palette Trust",
-  description: "Customer experience portal",
+  title: "Pal Trust",
+  description: "口コミ対策改善システム",
   icons: {
-    icon: "/favicon.png",
+    icon: "/logo-icon.svg",
   },
 };
 

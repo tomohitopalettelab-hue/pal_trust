@@ -18,10 +18,13 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const customerId = searchParams.get('customerId') || searchParams.get('customer') || 'default';
 
+    // 大文字小文字を区別せず、完全一致を最優先・次に最終更新が新しいものを返す
+    // （重複レコードがあっても常に最新を返すことで「保存後にリセット」を防ぐ）
     const { rows } = await sql`
       SELECT data
       FROM customer_app_settings
-      WHERE customer_id = ${customerId} OR customer_id = ${customerId.toLowerCase()} OR customer_id = ${customerId.toUpperCase()}
+      WHERE LOWER(customer_id) = LOWER(${customerId})
+      ORDER BY (customer_id = ${customerId}) DESC, updated_at DESC
       LIMIT 1;
     `;
 
@@ -34,12 +37,20 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const customerId = body?.customerId || 'default';
+    const customerId = String(body?.customerId || 'default');
     await ensureTable();
+
+    // 大文字小文字違いの重複レコードがあると「保存後リセット」の原因になるため、
+    // 保存対象以外の同名（case-insensitive）レコードを先に削除して統合する
+    await sql`
+      DELETE FROM customer_app_settings
+      WHERE LOWER(customer_id) = LOWER(${customerId})
+        AND customer_id <> ${customerId};
+    `;
 
     await sql`
       INSERT INTO customer_app_settings (customer_id, data, updated_at)
-      VALUES (${String(customerId)}, ${JSON.stringify(body)}, CURRENT_TIMESTAMP)
+      VALUES (${customerId}, ${JSON.stringify(body)}, CURRENT_TIMESTAMP)
       ON CONFLICT (customer_id)
       DO UPDATE SET data = ${JSON.stringify(body)}, updated_at = CURRENT_TIMESTAMP;
     `;

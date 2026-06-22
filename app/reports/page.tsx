@@ -152,9 +152,15 @@ function ReportsPageContent() {
       ? review.all_answers
       : {};
 
+    const formatAnswer = (value: unknown): string => {
+      if (value == null) return '';
+      if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(' / ');
+      return String(value);
+    };
+
     const configuredEntries = surveyItems.map((item, index) => {
       const answerValue = rawAnswers[String(item.id)];
-      const answerText = answerValue == null ? '' : String(answerValue);
+      const answerText = formatAnswer(answerValue);
       return {
         key: String(item.id),
         questionText: item.text,
@@ -168,7 +174,7 @@ function ReportsPageContent() {
     const extraEntries = Object.entries(rawAnswers)
       .filter(([key]) => !questionOrder.has(key))
       .map(([key, value]) => {
-        const answerText = value == null ? '' : String(value);
+        const answerText = formatAnswer(value);
         return {
           key,
           questionText: questionLabel.get(key) || `質問 ${key}`,
@@ -255,8 +261,8 @@ function ReportsPageContent() {
   if (customerActive === false) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
-        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-8 text-center space-y-4">
-          <h1 className="text-2xl font-black italic">この顧客URLは現在停止中です</h1>
+        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-8 text-center space-y-4">
+          <h1 className="text-2xl font-black t-italic">この顧客URLは現在停止中です</h1>
           <p className="text-sm font-bold text-[var(--theme-text)]/70">管理者にお問い合わせください。</p>
         </div>
       </div>
@@ -272,25 +278,25 @@ function ReportsPageContent() {
           <div className="animate-in fade-in slide-in-from-left-4 duration-700">
             <Link href={`/main?customerId=${encodeURIComponent(customerId)}`} className="flex items-center gap-2 group">
               <span className="text-2xl group-hover:-translate-x-1 transition-transform">←</span>
-              <h1 className="text-2xl md:text-3xl font-black tracking-tighter italic leading-none uppercase">Analytics</h1>
+              <h1 className="text-2xl md:text-3xl font-black tracking-tighter t-italic leading-none uppercase">Analytics</h1>
             </Link>
-            <p className="text-[10px] md:text-xs font-black uppercase tracking-widest mt-2 italic text-[var(--theme-primary)]">集計レポート</p>
+            <p className="text-[10px] md:text-xs font-black uppercase tracking-widest mt-2 t-italic text-[var(--theme-primary)]">集計レポート</p>
           </div>
         </header>
 
         {/* 統計サマリー */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <div className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] p-8 rounded-[3rem] shadow-[8px_8px_0px_var(--theme-border)]">
-            <p className="text-[10px] font-black text-[var(--theme-text)] opacity-60 uppercase italic mb-2">総回答数</p>
-            <div className="flex items-baseline gap-2 text-7xl font-black italic tracking-tighter">{totalCount}</div>
+          <div className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 rounded-[var(--theme-radius-lg)] shadow-[var(--theme-shadow)]">
+            <p className="text-[10px] font-black text-[var(--theme-text)] opacity-60 uppercase t-italic mb-2">総回答数</p>
+            <div className="flex items-baseline gap-2 text-7xl font-black t-italic tracking-tighter">{totalCount}</div>
           </div>
-          <div className="border-[3px] border-[var(--theme-border)] p-8 rounded-[3rem] shadow-[8px_8px_0px_var(--theme-border)] bg-[var(--theme-primary)] text-[var(--theme-on-primary)]">
-            <p className="text-[10px] font-black opacity-60 uppercase italic mb-2">平均満足度</p>
-            <div className="flex items-baseline gap-2 text-7xl font-black italic tracking-tighter">{avgRating}<span className="text-2xl">/5.0</span></div>
+          <div className="border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 rounded-[var(--theme-radius-lg)] shadow-[var(--theme-shadow)] bg-[var(--theme-primary)] text-[var(--theme-on-primary)]">
+            <p className="text-[10px] font-black opacity-60 uppercase t-italic mb-2">平均満足度</p>
+            <div className="flex items-baseline gap-2 text-7xl font-black t-italic tracking-tighter">{avgRating}<span className="text-2xl">/5.0</span></div>
           </div>
-          <div className="bg-[var(--theme-card-bg)] text-[var(--theme-text)] border-[3px] border-[var(--theme-border)] p-8 rounded-[3rem] shadow-[8px_8px_0px_var(--theme-primary)]">
-            <p className="text-[10px] font-black text-[var(--theme-text)] opacity-60 uppercase italic mb-2">口コミ投稿率</p>
-            <div className="flex items-baseline gap-2 text-7xl font-black italic tracking-tighter">{reviewPostRate}<span className="text-2xl text-[var(--theme-primary)]">%</span></div>
+          <div className="bg-[var(--theme-card-bg)] text-[var(--theme-text)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 rounded-[var(--theme-radius-lg)] shadow-[var(--theme-shadow-accent)]">
+            <p className="text-[10px] font-black text-[var(--theme-text)] opacity-60 uppercase t-italic mb-2">口コミ投稿率</p>
+            <div className="flex items-baseline gap-2 text-7xl font-black t-italic tracking-tighter">{reviewPostRate}<span className="text-2xl text-[var(--theme-primary)]">%</span></div>
             <p className="text-[10px] font-black text-[var(--theme-text)]/60 mt-2">{reviewClickCount} / {startedCount}</p>
             <div className="mt-3">
               <select
@@ -308,9 +314,9 @@ function ReportsPageContent() {
         </div>
 
         {/* グラフセクション */}
-        <section className="mb-16 bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] p-8 md:p-12 rounded-[4rem] shadow-[12px_12px_0px_var(--theme-border)]">
+        <section className="mb-16 bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 md:p-12 rounded-[var(--theme-radius-lg)] shadow-[var(--theme-shadow-lg)]">
           <div className="flex items-end justify-between mb-10">
-            <h3 className="text-sm font-black uppercase tracking-widest italic border-b-4 border-[var(--theme-primary)] inline-block">月別回答数の推移</h3>
+            <h3 className="text-sm font-black uppercase tracking-widest t-italic border-b-4 border-[var(--theme-primary)] inline-block">月別回答数の推移</h3>
             <p className="text-[11px] font-black text-[var(--theme-text)]/70">MAX: {monthlyMax}件</p>
           </div>
           <div className="flex items-end justify-between gap-2 md:gap-8" style={{ height: '240px' }}>
@@ -328,7 +334,7 @@ function ReportsPageContent() {
                       opacity: isLatest ? 1 : 0.25
                     }}
                   ></div>
-                  <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 italic uppercase mt-2">{data.month}</span>
+                  <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 t-italic uppercase mt-2">{data.month}</span>
                 </div>
               );
             })}
@@ -339,7 +345,7 @@ function ReportsPageContent() {
         <section>
           <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end mb-10 gap-8">
             <div className="w-full xl:w-auto">
-              <h3 className="text-xl font-black italic uppercase tracking-tighter border-b-4 border-[var(--theme-primary)] inline-block mb-6">回答一覧フィード</h3>
+              <h3 className="text-xl font-black t-italic uppercase tracking-tighter border-b-4 border-[var(--theme-primary)] inline-block mb-6">回答一覧フィード</h3>
               <div className="flex flex-col md:flex-row gap-3">
                 <select
                   value={sortBy}
@@ -371,29 +377,50 @@ function ReportsPageContent() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {filteredReviews.map((review) => (
-              <div key={review.id} className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] p-8 rounded-[3rem] shadow-[8px_8px_0px_var(--theme-border)] flex flex-col justify-between">
+              <div key={review.id} className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 rounded-[var(--theme-radius-lg)] shadow-[var(--theme-shadow)] flex flex-col justify-between">
                 <div>
                   <div className="flex justify-between items-start mb-6">
                     <div>
-                      <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 italic block mb-1">{new Date(review.created_at).toLocaleDateString('ja-JP')}</span>
+                      <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 t-italic block mb-1">{new Date(review.created_at).toLocaleDateString('ja-JP')}</span>
                       <span className="px-3 py-1 rounded-full text-[9px] font-black border border-[var(--theme-border)] bg-[var(--theme-primary)] text-[var(--theme-on-primary)]">
                         {review.category || "一般回答"}
                       </span>
                     </div>
-                    <div className="text-right">
-                      <div className="flex gap-0.5 mb-1">
-                        {[...Array(5)].map((_, i) => (
-                          <span key={i} className="text-lg" style={{ color: i < review.rating ? 'var(--theme-primary)' : '#f3f4f6' }}>★</span>
-                        ))}
+                    <div className="flex flex-col items-end gap-2">
+                      <div className="text-right">
+                        <div className="flex gap-0.5 mb-1">
+                          {[...Array(5)].map((_, i) => (
+                            <span key={i} className="text-lg" style={{ color: i < review.rating ? 'var(--theme-primary)' : '#f3f4f6' }}>★</span>
+                          ))}
+                        </div>
+                        <span className="text-2xl font-black t-italic">{review.rating}.0</span>
                       </div>
-                      <span className="text-2xl font-black italic">{review.rating}.0</span>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`この口コミ（${new Date(review.created_at).toLocaleDateString('ja-JP')}）を削除しますか？\nこの操作は取り消せません。`)) return;
+                          try {
+                            const res = await fetch(`/api/survey/${review.id}?customerId=${encodeURIComponent(customerId)}`, { method: 'DELETE' });
+                            if (res.ok) {
+                              setAllReviews((prev) => prev.filter((r) => r.id !== review.id));
+                            } else {
+                              alert('削除に失敗しました');
+                            }
+                          } catch {
+                            alert('通信エラーが発生しました');
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg border-2 border-red-300 text-red-600 text-[10px] font-black hover:bg-red-50 transition-colors flex items-center gap-1"
+                        title="この口コミを削除"
+                      >
+                        🗑 削除
+                      </button>
                     </div>
                   </div>
 
                   <div className="space-y-3">
                     <div>
                       <p className="text-[10px] font-black text-[var(--theme-text)]/60 uppercase">最終コメント（AI/自由入力）</p>
-                      <p className="text-sm font-black text-[var(--theme-text)] opacity-80 leading-relaxed italic border-l-4 border-[var(--theme-text)]/10 pl-4">「{review.comment || "（コメントなし）"}」</p>
+                      <p className="text-sm font-black text-[var(--theme-text)] opacity-80 leading-relaxed t-italic border-l-4 border-[var(--theme-text)]/10 pl-4">「{review.comment || "（コメントなし）"}」</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[10px] font-black text-[var(--theme-text)]/70">
@@ -439,18 +466,18 @@ function ReportsPageContent() {
         </section>
       </div>
 
-      <nav className="md:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-black/75 backdrop-blur-xl rounded-[3rem] h-24 flex justify-around items-center px-10 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)] z-50 border border-white/10 ring-1 ring-white/5">
+      <nav className="md:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-black/75 backdrop-blur-xl rounded-[var(--theme-radius-lg)] h-24 flex justify-around items-center px-10 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)] z-50 border border-white/10 ring-1 ring-white/5">
         <Link href={`/main?customerId=${encodeURIComponent(customerId)}`} className="flex flex-col items-center opacity-30 hover:opacity-100 transition-all group">
           <span className="text-white text-2xl">●</span>
-          <span className="text-white text-[8px] font-black uppercase italic tracking-widest mt-1">Home</span>
+          <span className="text-white text-[8px] font-black uppercase t-italic tracking-widest mt-1">Home</span>
         </Link>
         <Link href={`/reports?customerId=${encodeURIComponent(customerId)}`} className="flex flex-col items-center group">
           <span className="text-[var(--theme-primary)] text-2xl">●</span>
-          <span className="text-[var(--theme-primary)] text-[8px] font-black uppercase italic tracking-widest mt-1">Report</span>
+          <span className="text-[var(--theme-primary)] text-[8px] font-black uppercase t-italic tracking-widest mt-1">Report</span>
         </Link>
         <Link href={`/settings?customerId=${encodeURIComponent(customerId)}`} className="flex flex-col items-center opacity-30 hover:opacity-100 transition-all group">
-          <span className="text-white text-2xl italic font-serif group-active:rotate-12 transition-transform">⚙</span>
-          <span className="text-white text-[8px] font-black uppercase italic tracking-widest mt-1">Setting</span>
+          <span className="text-white text-2xl t-italic font-serif group-active:rotate-12 transition-transform">⚙</span>
+          <span className="text-white text-[8px] font-black uppercase t-italic tracking-widest mt-1">Setting</span>
         </Link>
       </nav>
     </div>

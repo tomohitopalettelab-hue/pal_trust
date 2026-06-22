@@ -96,11 +96,12 @@ function replacePlaceholders(text: string, vars: Record<string, string>): string
 
 export async function POST(req: Request) {
   try {
-    const { customerId, templateType, channel, campaign } = await req.json() as {
+    const { customerId, templateType, channel, campaign, headerImageUrl } = await req.json() as {
       customerId: string;
       templateType: TemplateType;
       channel: Channel;
       campaign?: string;
+      headerImageUrl?: string;
     };
 
     const template = TEMPLATES[templateType];
@@ -131,7 +132,7 @@ export async function POST(req: Request) {
     const isLine = channel === 'line_broadcast' || channel === 'line_push';
 
     if (isEmail) {
-      const templateVars = { companyName: appName, surveyUrl, campaign: campaign || '' };
+      const templateVars = { companyName: appName, surveyUrl, campaign: campaign || '', headerImageUrl: headerImageUrl || '' };
       let emailHtml = '';
       let emailSubject = '';
       if (templateType === 'survey') {

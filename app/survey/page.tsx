@@ -7,6 +7,7 @@ import { THEMES } from '../components/themes';
 import LoadingSpinner from '../components/LoadingSpinner';
 import NoticeToast from '../components/NoticeToast';
 import { useNotice } from '../components/useNotice';
+import Lottery from './Lottery';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,8 @@ type SurveyItem = {
   text: string;
   type: 'rating' | 'free' | 'choice' | string;
   options?: string[];
+  multiple?: boolean;
+  enabled?: boolean;
 };
 
 type AppSettings = {
@@ -30,9 +33,21 @@ type AppSettings = {
   googleMapUrl?: string;
   lowRatingMessage?: string;
   industry?: string;
+  aiReviewTaste?: string;
+  aiReviewLength?: string;
+  aiUseEmoji?: boolean;
+  aiBannedWords?: string;
+  aiPreferredWords?: string;
+  lottery?: {
+    enabled?: boolean;
+    animation?: 'roulette' | 'scratch' | string;
+    timing?: 'all' | 'high' | 'low' | string;
+    prizes?: { id: string; name: string; probability: number }[];
+    loseMessage?: string;
+  };
 };
 
-type AnswerValue = string | number;
+type AnswerValue = string | number | string[];
 
 const normalizeSurveyItems = (items: unknown): SurveyItem[] => {
   if (!Array.isArray(items) || items.length === 0) {
@@ -52,17 +67,30 @@ const normalizeSurveyItems = (items: unknown): SurveyItem[] => {
         options: Array.isArray(row.options)
           ? row.options.map((opt) => String(opt).trim()).filter(Boolean)
           : [],
+        multiple: Boolean(row.multiple),
+        enabled: row.enabled === undefined ? true : Boolean(row.enabled),
       } as SurveyItem;
     })
     .filter((item): item is SurveyItem => Boolean(item));
 
-  return normalized.length > 0 ? normalized : DEFAULT_SURVEY_ITEMS;
+  // 1つ目は必ず★評価・有効状態に矯正（誤って削除されないよう保険）
+  if (normalized.length > 0) {
+    normalized[0] = { ...normalized[0], type: 'rating', enabled: true };
+  }
+
+  // 2つ目以降のみ非表示フィルターを適用
+  const result = normalized.length > 0
+    ? [normalized[0], ...normalized.slice(1).filter((item) => item.enabled !== false)]
+    : normalized;
+
+  return result.length > 0 ? result : DEFAULT_SURVEY_ITEMS;
 };
 
 function SurveyPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const routeCustomerId = searchParams.get('customerId') || searchParams.get('customer') || '';
+  const isDemo = searchParams.get('demo') === '1';
   // --- 以下、元の状態管理のコードに続きます ---
 
 
@@ -72,8 +100,14 @@ function SurveyPageContent() {
   const [answers, setAnswers] = useState<Record<number, AnswerValue>>({});
   const [comment, setComment] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [aiVariants, setAiVariants] = useState<string[]>([]);
+  const [selectedVariantIdx, setSelectedVariantIdx] = useState<number | null>(null);
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const [surveySessionId, setSurveySessionId] = useState('');
+
+  // 抽選: 表示中フラグと、抽選完了後に行う遷移を保持
+  const [showLottery, setShowLottery] = useState(false);
+  const pendingNavRef = React.useRef<(() => void) | null>(null);
 
   const customerId = routeCustomerId;
 
@@ -81,6 +115,7 @@ function SurveyPageContent() {
   const [loading, setLoading] = useState(true);
   const [customerActive, setCustomerActive] = useState<boolean | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [customerName, setCustomerName] = useState('');
   const [surveyItems, setSurveyItems] = useState<SurveyItem[]>(DEFAULT_SURVEY_ITEMS);
   const { notice, showNotice, clearNotice } = useNotice();
 
@@ -88,9 +123,17 @@ function SurveyPageContent() {
   // 管理画面の設定(appSettings)にテーマ名があればそれを、なければ standard を使います
   const themeKey = appSettings?.themeName || 'standard';
   const theme = THEMES[themeKey] || THEMES.standard;
-  const displayAppName = appSettings?.appName ?? '...';
-  const subtitle = String(appSettings?.appSubtitle ?? '...');
-  const displayAppSubtitle = subtitle.trim().toUpperCase() === 'SURVEY' ? 'アンケート' : subtitle;
+  // "..." "・・・" "…" などの無意味な値を空扱いに
+  const cleanText = (v: unknown): string => {
+    const s = String(v ?? '').trim();
+    if (!s) return '';
+    if (/^[.．・…\s]+$/.test(s)) return '';
+    return s;
+  };
+  // 優先順位: appName設定 → CRMの会社名 → 空（その場合は表示しない）
+  const displayAppName = cleanText(appSettings?.appName) || cleanText(customerName);
+  const subtitleRaw = cleanText(appSettings?.appSubtitle);
+  const displayAppSubtitle = subtitleRaw.toUpperCase() === 'SURVEY' ? 'アンケート' : (subtitleRaw || 'アンケート');
   // ----------------
 
   // --- DBから設定（アプリ名・質問事項・基準値）を読み込む ---
@@ -100,12 +143,18 @@ function SurveyPageContent() {
     }
 
     let isActive = true;
+    // デモモード: 顧客アクティブ判定をスキップして強制的に有効扱いに
+    if (isDemo) {
+      setCustomerActive(true);
+      return () => { isActive = false; };
+    }
     const checkStatus = async () => {
       try {
         const res = await fetch(`/api/customer-status?customerId=${encodeURIComponent(customerId)}`);
         const data = await res.json();
         if (!isActive) return;
         setCustomerActive(Boolean(data?.exists && data?.isActive));
+        if (data?.customerName) setCustomerName(String(data.customerName));
       } catch {
         if (!isActive) return;
         setCustomerActive(false);
@@ -116,7 +165,7 @@ function SurveyPageContent() {
     return () => {
       isActive = false;
     };
-  }, [customerId]);
+  }, [customerId, isDemo]);
 
   // --- DBから設定（アプリ名・質問事項・基準値）を読み込む ---
   useEffect(() => {
@@ -130,23 +179,33 @@ function SurveyPageContent() {
       return;
     }
 
-    const cacheKey = `survey-settings:${customerId}`;
+    // キャッシュバージョン: v2（古いキャッシュ無効化）
+    const cacheKey = `survey-settings-v2:${customerId}`;
+    // 旧キャッシュをクリーンアップ
+    if (typeof window !== 'undefined') {
+      try { window.sessionStorage.removeItem(`survey-settings:${customerId}`); } catch {}
+    }
     let hasCache = false;
     if (typeof window !== 'undefined') {
       const cached = window.sessionStorage.getItem(cacheKey);
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
+          // 壊れたキャッシュ（settingsが無い）は無視して再フェッチ
           if (parsed?.settings) {
             setAppSettings(parsed.settings);
-          }
-          if (Array.isArray(parsed?.surveyItems) && parsed.surveyItems.length > 0) {
-            setSurveyItems(normalizeSurveyItems(parsed.surveyItems));
+            if (Array.isArray(parsed?.surveyItems) && parsed.surveyItems.length > 0) {
+              setSurveyItems(normalizeSurveyItems(parsed.surveyItems));
+            } else {
+              setSurveyItems(DEFAULT_SURVEY_ITEMS);
+            }
+            hasCache = true;
+            setLoading(false);
           } else {
-            setSurveyItems(DEFAULT_SURVEY_ITEMS);
+            // 壊れたキャッシュは削除
+            window.sessionStorage.removeItem(cacheKey);
+            hasCache = false;
           }
-          hasCache = true;
-          setLoading(false);
         } catch {
           hasCache = false;
         }
@@ -182,13 +241,16 @@ function SurveyPageContent() {
         const data = await res.json();
         if (!isActive) return;
         if (data) {
-          setAppSettings(data.settings);
+          if (data.settings) {
+            setAppSettings(data.settings);
+          }
           setSurveyItems(normalizeSurveyItems(data.surveyItems));
-          if (typeof window !== 'undefined') {
+          // settingsが取得できた場合のみキャッシュに保存（壊れたキャッシュを防ぐ）
+          if (typeof window !== 'undefined' && data.settings) {
             window.sessionStorage.setItem(
               cacheKey,
               JSON.stringify({
-                settings: data.settings || null,
+                settings: data.settings,
                 surveyItems: normalizeSurveyItems(data.surveyItems),
               })
             );
@@ -218,6 +280,18 @@ function SurveyPageContent() {
     };
   }, [customerId, customerActive]);
 
+  // body / htmlのスクロール完全禁止（surveyページにいる間のみ）
+  useEffect(() => {
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+    };
+  }, []);
+
   // --- ハンドラー ---
   const handleNext = (val: AnswerValue) => {
     setSelectedRating(typeof val === 'number' ? val : null);
@@ -242,6 +316,8 @@ function SurveyPageContent() {
   // AI口コミ生成（実際のロジックをここに組めます）
   const generateAiComment = async () => {
     setIsGenerating(true);
+    setAiVariants([]);
+    setSelectedVariantIdx(null);
     try {
       const res = await fetch('/api/generate-ai', {
         method: 'POST',
@@ -249,17 +325,31 @@ function SurveyPageContent() {
         body: JSON.stringify({
           answers: answers,
           surveyItems: surveyItems,
-          settings: appSettings // これを追加！管理画面の設定を丸ごと送る
+          settings: appSettings,
         }),
       });
       const data = await res.json();
-      setComment(data.comment);
+      const variants: string[] = Array.isArray(data.variants) ? data.variants.filter((s: unknown): s is string => typeof s === 'string' && s.length > 0) : [];
+      if (variants.length === 0) {
+        setComment("申し訳ありません。文章の作成に失敗しました。");
+      } else {
+        setAiVariants(variants);
+        // 最初の案をデフォルト選択 & テキストエリアに反映
+        setSelectedVariantIdx(0);
+        setComment(variants[0]);
+      }
     } catch (e) {
       console.error("AI生成エラー:", e);
       setComment("申し訳ありません。文章の作成に失敗しました。");
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const selectVariant = (idx: number) => {
+    if (idx < 0 || idx >= aiVariants.length) return;
+    setSelectedVariantIdx(idx);
+    setComment(aiVariants[idx]);
   };
 
   // --- アンケート最終送信（コピー ＆ マップ遷移） ---
@@ -290,30 +380,34 @@ function SurveyPageContent() {
     };
 
     try {
-      if (isHighRating && surveySessionId) {
-        try {
-          await fetch('/api/survey-funnel', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              customerId,
-              sessionId: surveySessionId,
-              action: 'review_click',
-            }),
-          });
-        } catch {}
+      if (isDemo) {
+        // デモモード: DBには保存しないが、UI挙動は通常通り
+        showNotice('デモモードのため、回答は保存されませんでした', 'info');
+      } else {
+        if (isHighRating && surveySessionId) {
+          try {
+            await fetch('/api/survey-funnel', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                customerId,
+                sessionId: surveySessionId,
+                action: 'review_click',
+              }),
+            });
+          } catch {}
+        }
+
+        // 1. データをDBに保存（ここでレポートに追加されます）
+        await fetch('/api/survey', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
       }
 
-      // 1. データをDBに保存（ここでレポートに追加されます）
-      await fetch('/api/survey', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      // 2. 高評価ならコピー ＆ マップ遷移
-      if (isHighRating) {
-        // clipboard APIはページにフォーカスがないと失敗するのでwindow.openより先に実行
+      // 高評価ルートの最終アクション（コピー＆Googleマップ遷移）
+      const goHighRating = async () => {
         if (comment) {
           try {
             await navigator.clipboard.writeText(comment);
@@ -322,16 +416,33 @@ function SurveyPageContent() {
           }
         }
         showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success', 5000);
-        // トーストを見せてからGoogleマップへ遷移（同じタブで遷移しポップアップブロックを回避）
         await new Promise(resolve => setTimeout(resolve, 2000));
         if (appSettings?.googleMapUrl) {
           window.location.href = appSettings.googleMapUrl;
         }
+      };
+      // 低評価ルートの最終アクション（サンクスページ）
+      const goLowRating = () => {
+        router.push(`/thanks?rating=${totalRating}&customerId=${encodeURIComponent(customerId)}`);
+      };
+
+      const finalNav = isHighRating ? goHighRating : goLowRating;
+
+      // 抽選: 有効かつタイミング条件一致なら、最終遷移の前に抽選を表示
+      const lot = appSettings?.lottery;
+      const timing = lot?.timing || 'all';
+      const lotteryApplies =
+        Boolean(lot?.enabled) &&
+        Array.isArray(lot?.prizes) &&
+        (timing === 'all' || (timing === 'high' && isHighRating) || (timing === 'low' && !isHighRating));
+
+      if (lotteryApplies) {
+        pendingNavRef.current = () => { void finalNav(); };
+        setShowLottery(true);
         return;
       }
 
-      // 3. 低評価の場合のみサンクスページへ移動
-      router.push(`/thanks?rating=${totalRating}&customerId=${encodeURIComponent(customerId)}`);
+      await finalNav();
     } catch {
       showNotice('送信に失敗しました', 'error');
     }
@@ -339,7 +450,7 @@ function SurveyPageContent() {
 
   // --- UI部品（星評価） ---
   const RatingOptions = ({ onSelect }: { onSelect: (v: number) => void }) => (
-    <div className="grid grid-cols-1 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full max-w-md">
+    <div className="flex flex-col gap-2 md:gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full max-w-md">
       {[5, 4, 3, 2, 1].map((star) => {
         const isSelected = selectedRating === star;
         const getBgColor = (s: number) => {
@@ -353,15 +464,15 @@ function SurveyPageContent() {
 
         return (
           <button key={star} onClick={() => onSelect(star)}
-            className={`relative flex items-center justify-between p-6 rounded-2xl border-3 border-[var(--theme-border)] font-black text-xl transition-all duration-200 active:scale-95 shadow-[6px_6px_0px_var(--theme-border)] ${getBgColor(star)} ${isSelected ? `translate-x-[2px] translate-y-[2px] shadow-none` : ''}`}
+            className={`h-[76px] md:h-[96px] relative flex items-center justify-between px-5 md:p-6 rounded-2xl border-[length:var(--theme-bw)] border-[var(--theme-border)] font-black text-lg md:text-2xl transition-all duration-200 active:scale-95 shadow-[var(--theme-shadow-sm)] md:shadow-[var(--theme-shadow-md)] ${getBgColor(star)} ${isSelected ? `translate-x-[2px] translate-y-[2px] shadow-none` : ''}`}
           >
-            <span className="flex items-center gap-3">
-              <span className="text-2xl">{star >= 4 ? '😊' : star === 3 ? '😐' : '😞'}</span>
-              {star === 5 ? '最高！' : star === 4 ? '満足' : star === 3 ? '普通' : star === 2 ? '微妙' : '不満'}
+            <span className="flex items-center gap-2 md:gap-3">
+              <span className="text-2xl md:text-3xl">{star >= 4 ? '😊' : star === 3 ? '😐' : '😞'}</span>
+              {star === 5 ? 'とても満足' : star === 4 ? '満足' : star === 3 ? '普通' : star === 2 ? '微妙' : '不満'}
             </span>
             <div className="flex">
               {[...Array(5)].map((_, i) => (
-                <span key={i} className={`text-sm ${i < star ? 'text-[var(--theme-text)]' : 'text-[var(--theme-border)] opacity-30'}`}>★</span>
+                <span key={i} className={`text-sm md:text-base ${i < star ? 'text-[var(--theme-text)]' : 'text-[var(--theme-border)] opacity-30'}`}>★</span>
               ))}
             </div>
           </button>
@@ -370,9 +481,10 @@ function SurveyPageContent() {
     </div>
   );
 
-  const ChoiceOptions = ({ item, onSelect }: { item: SurveyItem; onSelect: (v: string) => void }) => {
+  const ChoiceOptions = ({ item, onSelect }: { item: SurveyItem; onSelect: (v: AnswerValue) => void }) => {
     const options = (item.options || []).filter(Boolean);
-    const selected = String(answers[item.id] || '');
+    const current = answers[item.id];
+    const isMultiple = Boolean(item.multiple);
 
     if (options.length === 0) {
       return (
@@ -382,15 +494,57 @@ function SurveyPageContent() {
       );
     }
 
+    if (isMultiple) {
+      // 複数選択モード
+      const selectedArr: string[] = Array.isArray(current) ? current.map(String) : [];
+      const toggleOption = (option: string) => {
+        const next = selectedArr.includes(option)
+          ? selectedArr.filter((s) => s !== option)
+          : [...selectedArr, option];
+        setAnswers({ ...answers, [item.id]: next });
+      };
+      return (
+        <div className="flex flex-col gap-2 md:gap-3 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full max-w-md h-full min-h-0">
+          <p className="text-[10px] md:text-[11px] font-black text-[var(--theme-text)]/60 uppercase tracking-widest shrink-0">複数選択可（{selectedArr.length}件選択中）</p>
+          <div className="flex flex-col gap-2 md:gap-3 flex-1 min-h-0 overflow-y-auto pr-1">
+            {options.map((option) => {
+              const isSelected = selectedArr.includes(option);
+              return (
+                <button
+                  key={option}
+                  onClick={() => toggleOption(option)}
+                  className={`shrink-0 min-h-[64px] md:min-h-[80px] px-5 md:p-5 rounded-2xl border-[length:var(--theme-bw)] border-[var(--theme-border)] font-black text-base md:text-xl transition-all duration-200 active:scale-95 shadow-[var(--theme-shadow-sm)] md:shadow-[var(--theme-shadow-md)] flex items-center gap-3 text-left ${isSelected ? 'bg-[var(--theme-primary)] text-[var(--theme-on-primary)] translate-x-[2px] translate-y-[2px] shadow-none' : 'bg-[var(--theme-card-bg)] text-[var(--theme-text)]'}`}
+                >
+                  <span className={`w-5 h-5 md:w-6 md:h-6 rounded-md border-2 flex items-center justify-center shrink-0 text-xs ${isSelected ? 'border-[var(--theme-on-primary)] bg-[var(--theme-on-primary)]/20' : 'border-[var(--theme-border)]'}`}>
+                    {isSelected ? '✓' : ''}
+                  </span>
+                  {option}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => onSelect(selectedArr)}
+            disabled={selectedArr.length === 0}
+            className="shrink-0 w-full bg-[var(--theme-text)] text-[var(--theme-bg)] p-4 md:p-5 rounded-2xl font-black text-lg md:text-xl shadow-[var(--theme-shadow-accent-sm)] md:shadow-[var(--theme-shadow-accent)] border-2 border-transparent active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50"
+          >
+            次へ進む
+          </button>
+        </div>
+      );
+    }
+
+    // 単一選択モード（従来動作）
+    const selected = typeof current === 'string' ? current : '';
     return (
-      <div className="grid grid-cols-1 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full max-w-md">
+      <div className="flex flex-col gap-2 md:gap-3 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full max-w-md h-full min-h-0 overflow-y-auto pr-1">
         {options.map((option) => {
           const isSelected = selected === option;
           return (
             <button
               key={option}
               onClick={() => onSelect(option)}
-              className={`p-5 rounded-2xl border-3 border-[var(--theme-border)] font-black text-lg transition-all duration-200 active:scale-95 shadow-[6px_6px_0px_var(--theme-border)] ${isSelected ? 'bg-[var(--theme-primary)] text-[var(--theme-on-primary)] translate-x-[2px] translate-y-[2px] shadow-none' : 'bg-[var(--theme-card-bg)] text-[var(--theme-text)]'}`}
+              className={`shrink-0 min-h-[64px] md:min-h-[80px] px-5 md:p-5 rounded-2xl border-[length:var(--theme-bw)] border-[var(--theme-border)] font-black text-base md:text-xl transition-all duration-200 active:scale-95 shadow-[var(--theme-shadow-sm)] md:shadow-[var(--theme-shadow-md)] ${isSelected ? 'bg-[var(--theme-primary)] text-[var(--theme-on-primary)] translate-x-[2px] translate-y-[2px] shadow-none' : 'bg-[var(--theme-card-bg)] text-[var(--theme-text)]'}`}
             >
               {option}
             </button>
@@ -403,8 +557,8 @@ function SurveyPageContent() {
   if (!customerId) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
-        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-8 text-center space-y-4">
-          <h1 className="text-2xl font-black italic">このURLは利用できません</h1>
+        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-8 text-center space-y-4">
+          <h1 className="text-2xl font-black t-italic">このURLは利用できません</h1>
           <p className="text-sm font-bold text-[var(--theme-text)]/70">顧客専用のアンケートURL（customerId付き）からアクセスしてください。</p>
         </div>
       </div>
@@ -414,8 +568,8 @@ function SurveyPageContent() {
   if (customerActive === false) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
-        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-8 text-center space-y-4">
-          <h1 className="text-2xl font-black italic">この顧客URLは現在停止中です</h1>
+        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-8 text-center space-y-4">
+          <h1 className="text-2xl font-black t-italic">この顧客URLは現在停止中です</h1>
           <p className="text-sm font-bold text-[var(--theme-text)]/70">管理者にお問い合わせください。</p>
         </div>
       </div>
@@ -425,7 +579,10 @@ function SurveyPageContent() {
   if (loading || customerActive === null) return <LoadingSpinner />;
 
   return (
-    <div className={`min-h-screen ${theme.bg} text-[var(--theme-text)] font-sans flex flex-col items-center justify-center p-6 overflow-hidden`}>
+    <div
+      className={`${theme.bg} text-[var(--theme-text)] font-sans flex flex-col items-center justify-center p-3 md:p-6 overflow-hidden fixed inset-0`}
+      style={{ height: '100dvh' }}
+    >
       {notice && (
         <NoticeToast
           message={notice.message}
@@ -434,20 +591,40 @@ function SurveyPageContent() {
         />
       )}
 
-      {step === -1 ? (
+      {/* デモモードバッジ */}
+      {isDemo && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[150] px-4 py-1.5 bg-yellow-400 text-black border-2 border-black rounded-full text-[10px] font-black shadow-[3px_3px_0_#000]">
+          🎬 DEMO MODE（回答は保存されません）
+        </div>
+      )}
+
+      {showLottery ? (
+        <Lottery
+          animation={String(appSettings?.lottery?.animation || 'roulette')}
+          prizes={(appSettings?.lottery?.prizes || []).filter((p) => p && p.name)}
+          loseMessage={String(appSettings?.lottery?.loseMessage || '')}
+          customerId={customerId}
+          isDemo={isDemo}
+          onComplete={() => {
+            const nav = pendingNavRef.current;
+            pendingNavRef.current = null;
+            setShowLottery(false);
+            if (nav) nav();
+          }}
+        />
+      ) : step === -1 ? (
         /* --- STEP -1: インパクト抜群のスタート画面 --- */
-        <main className={`w-full max-w-md ${theme.card} p-10 flex flex-col items-center text-center space-y-8 animate-in zoom-in-95 duration-500`}>
-          <div className={`w-24 h-24 ${theme.accentBg} border-4 border-[var(--theme-border)] rounded-[2rem] flex items-center justify-center text-5xl shadow-[6px_6px_0px_var(--theme-border)] -rotate-3`}>
-            ✨
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-black tracking-[0.3em] uppercase text-gray-400">Feedback System</p>
-           <h1 className={`text-5xl ${theme.text} leading-none tracking-tighter`}>
-  {displayAppName} <br />
+        <main className={`w-[90%] max-w-md mx-auto ${theme.card} p-5 md:p-10 flex flex-col items-center text-center space-y-4 md:space-y-8 animate-in zoom-in-95 duration-500`}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-icon.svg" alt="Pal Trust" className="w-20 h-20 md:w-28 md:h-28 -rotate-3" />
+          <div className="space-y-1 md:space-y-2">
+            <p className="text-[10px] md:text-xs font-black tracking-[0.3em] uppercase text-gray-400">Feedback System</p>
+           <h1 className={`text-3xl md:text-5xl ${theme.text} leading-none tracking-tighter`}>
+  {displayAppName && (<>{displayAppName} <br /></>)}
   <span className={theme.accentText}>{displayAppSubtitle}</span>
 </h1>
           </div>
-          <p className="text-sm font-bold text-gray-500 leading-relaxed">
+          <p className="text-xs md:text-sm font-bold text-gray-500 leading-relaxed">
             あなたの声が、お店を創る。 <br />
             わずか1分で終わる簡単なアンケートに <br />
             ご協力をお願いします。
@@ -459,104 +636,133 @@ function SurveyPageContent() {
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     setSurveySessionId(sessionId);
-    try {
-      await fetch('/api/survey-funnel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId,
-          sessionId,
-          action: 'start',
-        }),
-      });
-    } catch {}
+    if (!isDemo) {
+      try {
+        await fetch('/api/survey-funnel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId,
+            sessionId,
+            action: 'start',
+          }),
+        });
+      } catch {}
+    }
 
     setStep(0);
   }}
-  className={`w-full ${theme.button} py-6 text-2xl italic`}
+  className={`w-full ${theme.button} py-4 md:py-6 text-xl md:text-2xl t-italic`}
 >
   START!
 </button>
         </main>
       ) : (
         /* --- アンケート本編 --- */
-        <div className="w-full max-w-md flex flex-col items-center">
+        <div className="w-[90%] max-w-md mx-auto flex flex-col items-center h-full">
           {/* プログレスバー */}
-          <div className="w-full mb-12">
-            <div className="h-4 bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] rounded-full overflow-hidden shadow-[4px_4px_0px_var(--theme-border)]">
+          <div className="w-full mb-3 md:mb-12 shrink-0">
+            <div className="h-3 md:h-4 bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] rounded-full overflow-hidden shadow-[var(--theme-shadow-sm)]">
               <div className={`h-full bg-[var(--theme-primary)] border-r-2 border-[var(--theme-border)] transition-all duration-500`}
                 style={{ width: `${((step + 1) / (surveyItems.length + 1)) * 100}%` }} />
             </div>
           </div>
 
-          <div className="w-full flex flex-col justify-center">
+          <div className="w-full flex-1 flex flex-col min-h-0 justify-center">
             {step < surveyItems.length ? (
-              <div key={step} className="animate-in fade-in slide-in-from-right-4 duration-500">
-                <p className="text-xs font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase italic tracking-tighter">Question {step + 1}</p>
-                <h2 className={`text-3xl font-black leading-tight mb-10 italic ${step === 0 ? 'underline decoration-[var(--theme-primary)] decoration-8 underline-offset-4' : ''}`}>
-                  {surveyItems[step].text}
-                </h2>
+              <div key={step} className="animate-in fade-in slide-in-from-right-4 duration-500 flex flex-col min-h-0 max-h-full gap-3 md:gap-6">
+                <div className="shrink-0">
+                  <p className="text-xs md:text-sm font-black text-[var(--theme-text)] opacity-60 mb-1 md:mb-2 uppercase t-italic tracking-tighter">Question {step + 1}</p>
+                  <h2 className={`text-2xl md:text-3xl font-black leading-tight t-italic ${step === 0 ? 'underline decoration-[var(--theme-primary)] decoration-4 md:decoration-8 underline-offset-4' : ''}`}>
+                    {surveyItems[step].text}
+                  </h2>
+                </div>
 
-                {surveyItems[step].type === "rating" ? (
-                  <RatingOptions onSelect={handleNext} />
-                ) : surveyItems[step].type === "choice" ? (
-                  <ChoiceOptions item={surveyItems[step]} onSelect={handleNext} />
-                ) : (
-                  <div className="space-y-6">
-                    <textarea
-                      rows={5}
-                      value={answers[surveyItems[step].id] || ""}
-                      onChange={(e) => setAnswers({ ...answers, [surveyItems[step].id]: e.target.value })}
-                      className="w-full bg-[var(--theme-card-bg)] text-[var(--theme-text)] border-3 border-[var(--theme-border)] p-5 rounded-2xl font-bold outline-none focus:bg-[var(--theme-primary)]/5 shadow-[6px_6px_0px_var(--theme-border)]"
-                      placeholder="こちらにご入力ください..."
-                    />
-                    <button
-                      onClick={() => handleNext(answers[surveyItems[step].id])}
-                      disabled={!answers[surveyItems[step].id]}
-                      className="w-full bg-[var(--theme-text)] text-[var(--theme-bg)] p-6 rounded-2xl font-black text-xl shadow-[8px_8px_0px_var(--theme-primary)] border-2 border-transparent active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50"
-                    >
-                      次へ進む
-                    </button>
-                  </div>
-                )}
+                <div className="flex-1 min-h-0 flex flex-col">
+                  {surveyItems[step].type === "rating" ? (
+                    <RatingOptions onSelect={handleNext} />
+                  ) : surveyItems[step].type === "choice" ? (
+                    <ChoiceOptions item={surveyItems[step]} onSelect={handleNext} />
+                  ) : (
+                    <div className="flex flex-col gap-3 md:gap-6 min-h-0">
+                      <textarea
+                        value={answers[surveyItems[step].id] || ""}
+                        onChange={(e) => setAnswers({ ...answers, [surveyItems[step].id]: e.target.value })}
+                        className="w-full min-h-[160px] max-h-[260px] md:max-h-[360px] bg-[var(--theme-card-bg)] text-[var(--theme-text)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-3 md:p-5 rounded-2xl text-sm md:text-base font-bold outline-none focus:bg-[var(--theme-primary)]/5 shadow-[var(--theme-shadow-md)] resize-none"
+                        placeholder="こちらにご入力ください..."
+                      />
+                      <button
+                        onClick={() => handleNext(answers[surveyItems[step].id])}
+                        disabled={!answers[surveyItems[step].id]}
+                        className="shrink-0 w-full bg-[var(--theme-text)] text-[var(--theme-bg)] p-4 md:p-6 rounded-2xl font-black text-lg md:text-xl shadow-[var(--theme-shadow-accent)] md:shadow-[var(--theme-shadow-accent)] border-2 border-transparent active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50"
+                      >
+                        次へ進む
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               /* --- 着地画面（高評価/低評価の完全分岐） --- */
-              <div className="animate-in zoom-in-95 duration-500 space-y-8">
+              <div className="animate-in zoom-in-95 duration-500 space-y-4 md:space-y-8 h-full flex flex-col justify-center">
                 {totalRating >= Number(appSettings?.minStarsForGoogle || 4) ? (
                   /* --- 【高評価ルート】口コミ投稿へ誘導 --- */
                   <>
                     <div className="text-center">
-                      <div className="w-20 h-20 bg-[var(--theme-text)] text-[var(--theme-bg)] rounded-[2rem] flex items-center justify-center text-4xl mx-auto mb-6 shadow-[8px_8px_0px_var(--theme-primary)]">✨</div>
-                      <h2 className="text-3xl font-black italic">高評価ありがとうございます！</h2>
-                      <p className="text-[var(--theme-text)] opacity-60 font-bold text-xs mt-4 leading-relaxed">AIが作成した文章をGoogle口コミに投稿しませんか？</p>
+                      <div className="w-14 h-14 md:w-20 md:h-20 bg-[var(--theme-text)] text-[var(--theme-bg)] rounded-2xl md:rounded-[var(--theme-radius)] flex items-center justify-center text-2xl md:text-4xl mx-auto mb-3 md:mb-6 shadow-[var(--theme-shadow-accent)] md:shadow-[var(--theme-shadow-accent)]">✨</div>
+                      <h2 className="text-xl md:text-3xl font-black t-italic">高評価ありがとうございます！</h2>
+                      <p className="text-[var(--theme-text)] opacity-60 font-bold text-[11px] md:text-xs mt-2 md:mt-4 leading-relaxed">AIが作成した文章をGoogle口コミに投稿しませんか？</p>
                     </div>
 
-                    <div className="relative bg-[var(--theme-card-bg)] border-3 border-[var(--theme-border)] rounded-[2rem] p-5 shadow-[8px_8px_0px_var(--theme-border)]">
+                    {/* 3案セレクター（生成後のみ表示） */}
+                    {aiVariants.length > 0 && (
+                      <div className="flex gap-2">
+                        {aiVariants.map((_, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => selectVariant(idx)}
+                            className={`flex-1 py-2 rounded-xl border-2 text-[11px] font-black transition-all ${
+                              selectedVariantIdx === idx
+                                ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 shadow-[var(--theme-shadow-sm)]'
+                                : 'border-[var(--theme-border)] opacity-60'
+                            }`}
+                          >
+                            案{idx + 1}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="relative bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-2xl md:rounded-[var(--theme-radius)] p-3 md:p-5 shadow-[var(--theme-shadow-md)] md:shadow-[var(--theme-shadow)]">
                       <textarea
                         value={comment}
                         onChange={(e) => setComment(e.target.value)}
-                        className="w-full h-32 bg-transparent text-[var(--theme-text)] font-bold text-sm outline-none resize-none leading-relaxed"
+                        className="w-full h-28 md:h-36 bg-transparent text-[var(--theme-text)] font-bold text-xs md:text-sm outline-none resize-none leading-relaxed"
                         placeholder="AIでおまかせ、またはこちらに入力..."
                       />
+                      {aiVariants.length > 0 && !isGenerating && (
+                        <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">※選択した案は自由に編集できます</p>
+                      )}
                       {isGenerating && (
-                        <div className="absolute inset-0 bg-white/90 rounded-[2rem] flex flex-col items-center justify-center gap-2">
-                          <div className="w-6 h-6 border-4 border-black border-t-[var(--theme-primary)] rounded-full animate-spin"></div>
+                        <div className="absolute inset-0 bg-white/90 rounded-2xl md:rounded-[var(--theme-radius)] flex flex-col items-center justify-center gap-2">
+                          <div className="w-6 h-6 border-[length:var(--theme-bw)] border-black border-t-[var(--theme-primary)] rounded-full animate-spin"></div>
+                          <p className="text-[10px] font-black text-[var(--theme-text)]/60">3案を作成中...</p>
                         </div>
                       )}
                     </div>
 
-                    <div className="grid gap-4">
+                    <div className="grid gap-3 md:gap-4">
                       <button
                         onClick={generateAiComment}
-                        className={`bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-3 border-[var(--theme-border)] p-5 rounded-2xl font-black shadow-[6px_6px_0px_var(--theme-border)] active:scale-95 transition-all`}
+                        disabled={isGenerating}
+                        className="bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-3 md:p-5 rounded-2xl font-black text-sm md:text-base shadow-[var(--theme-shadow-sm)] md:shadow-[var(--theme-shadow-md)] active:scale-95 transition-all disabled:opacity-50"
                       >
-                        {comment ? '🔄 再生成する' : '✨ AIに文章作成を任せる'}
+                        {aiVariants.length > 0 ? '🔄 別の3案を作成' : '✨ AIに文章作成を任せる'}
                       </button>
 
                       <button
                         onClick={submitSurvey}
-                        className="bg-[var(--theme-text)] text-[var(--theme-bg)] p-6 rounded-2xl font-black text-xl shadow-[8px_8px_0px_var(--theme-primary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
+                        className="bg-[var(--theme-text)] text-[var(--theme-bg)] p-4 md:p-6 rounded-2xl font-black text-base md:text-xl shadow-[var(--theme-shadow-accent)] md:shadow-[var(--theme-shadow-accent)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
                       >
                         Google口コミを投稿する
                       </button>
@@ -564,15 +770,15 @@ function SurveyPageContent() {
                   </>
                 ) : (
                   /* --- 【低評価ルート】お詫びと送信のみ --- */
-                  <div className="text-center py-10 bg-[var(--theme-card-bg)] border-4 border-[var(--theme-border)] rounded-[3rem] p-8 shadow-[12px_12px_0px_var(--theme-border)]">
-                    <div className="w-20 h-20 bg-[var(--theme-card-bg)] rounded-[2rem] flex items-center justify-center text-4xl mx-auto mb-8 border-3 border-[var(--theme-border)] shadow-[8px_8px_0px_var(--theme-text)] opacity-80">✉️</div>
-                    <h2 className="text-2xl font-black italic mb-6">貴重なご意見を<br />ありがとうございます。</h2>
-                    <p className="text-[var(--theme-text)] opacity-70 font-bold text-sm leading-relaxed mb-10 px-4">
+                  <div className="text-center py-6 md:py-10 bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] md:rounded-[var(--theme-radius-lg)] p-5 md:p-8 shadow-[var(--theme-shadow)] md:shadow-[var(--theme-shadow-lg)]">
+                    <div className="w-14 h-14 md:w-20 md:h-20 bg-[var(--theme-card-bg)] rounded-2xl md:rounded-[var(--theme-radius)] flex items-center justify-center text-2xl md:text-4xl mx-auto mb-4 md:mb-8 border-[length:var(--theme-bw)] border-[var(--theme-border)] shadow-[var(--theme-shadow-md)] md:shadow-[var(--theme-shadow)] opacity-80">✉️</div>
+                    <h2 className="text-xl md:text-2xl font-black t-italic mb-3 md:mb-6">貴重なご意見を<br />ありがとうございます。</h2>
+                    <p className="text-[var(--theme-text)] opacity-70 font-bold text-xs md:text-sm leading-relaxed mb-5 md:mb-10 px-2 md:px-4">
                       {appSettings?.lowRatingMessage ?? "..."}
                     </p>
                     <button
                       onClick={submitSurvey}
-                      className="w-full bg-[var(--theme-text)] text-[var(--theme-bg)] p-6 rounded-2xl font-black text-xl shadow-[8px_8px_0px_var(--theme-primary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
+                      className="w-full bg-[var(--theme-text)] text-[var(--theme-bg)] p-4 md:p-6 rounded-2xl font-black text-base md:text-xl shadow-[var(--theme-shadow-accent)] md:shadow-[var(--theme-shadow-accent)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
                     >
                       送信して終了
                     </button>

@@ -15,12 +15,53 @@ type SurveyItem = {
   text: string;
   type: 'rating' | 'free' | 'choice' | string;
   options?: string[];
+  multiple?: boolean;
+  enabled?: boolean;
 };
 
 const DEFAULT_SURVEY_ITEMS: SurveyItem[] = [
   { id: 1, text: "接客の満足度はどうでしたか？", type: "rating" },
   { id: 2, text: "具体的に良かった点や改善点を教えてください", type: "free" },
 ];
+
+// --- 抽選機能 ---
+type LotteryPrize = { id: string; name: string; probability: number };
+type LotterySettings = {
+  enabled: boolean;
+  animation: 'roulette' | 'scratch';
+  timing: 'all' | 'high' | 'low';
+  prizes: LotteryPrize[];
+  loseMessage: string;
+};
+
+const DEFAULT_LOTTERY: LotterySettings = {
+  enabled: false,
+  animation: 'roulette',
+  timing: 'all',
+  prizes: [],
+  loseMessage: 'またのご参加をお待ちしております',
+};
+
+const normalizeLottery = (raw: unknown): LotterySettings => {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const prizes = Array.isArray(r.prizes)
+    ? r.prizes.map((p, i) => {
+        const pr = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>;
+        return {
+          id: String(pr.id || `prize-${Date.now()}-${i}`),
+          name: String(pr.name || ''),
+          probability: Math.max(0, Math.min(100, Number(pr.probability) || 0)),
+        };
+      })
+    : [];
+  return {
+    enabled: Boolean(r.enabled),
+    animation: r.animation === 'scratch' ? 'scratch' : 'roulette',
+    timing: r.timing === 'high' ? 'high' : r.timing === 'low' ? 'low' : 'all',
+    prizes,
+    loseMessage: String(r.loseMessage ?? DEFAULT_LOTTERY.loseMessage),
+  };
+};
 
 const normalizeSurveyItems = (items: unknown): SurveyItem[] => {
   if (!Array.isArray(items) || items.length === 0) {
@@ -39,9 +80,17 @@ const normalizeSurveyItems = (items: unknown): SurveyItem[] => {
         text: String(row.text || ''),
         type: String(row.type || 'free'),
         options: rawOptions.map((opt) => String(opt).trim()).filter(Boolean),
+        multiple: Boolean(row.multiple),
+        // enabled未設定（古いデータ）はデフォルトtrue
+        enabled: row.enabled === undefined ? true : Boolean(row.enabled),
       } as SurveyItem;
     })
     .filter((item): item is SurveyItem => Boolean(item));
+
+  // 1つ目は必ず★評価・有効状態に矯正（保険）
+  if (normalized.length > 0) {
+    normalized[0] = { ...normalized[0], type: 'rating', enabled: true };
+  }
 
   return normalized.length > 0 ? normalized : DEFAULT_SURVEY_ITEMS;
 };
@@ -56,14 +105,31 @@ function AdminDashboardContent() {
     appName: "PAL-TRUST",
     appSubtitle: "SURVEY",
     themeName: "standard",
+    themeColor: "",                 // カスタムアクセント色（空=テーマ標準色）
     minStarsForGoogle: "4",
-    aiReviewLength: "150",
+    aiReviewLength: "medium",       // short / medium / long
     aiReviewTaste: "friendly",      // 初期値
     aiReplyTaste: "professional",  // 初期値
+    aiUseEmoji: false,              // 絵文字を使うか
+    aiBannedWords: "",              // 改行/カンマ区切り
+    aiPreferredWords: "",           // 改行/カンマ区切り
     thanksPageContent: "本日はご来店ありがとうございました！またのお越しを心よりお待ちしております。",
     lowRatingMessage: "ご不便をおかけし申し訳ございません。いただいた内容は責任を持って店長へ報告し、サービスの改善に努めさせていただきます。",
     googleMapUrl: "https://goo.gl/maps/xxxx",
+    lottery: DEFAULT_LOTTERY as LotterySettings,
   });
+
+  // 抽選設定の更新ヘルパー
+  const lottery = settings.lottery || DEFAULT_LOTTERY;
+  const setLottery = (fields: Partial<LotterySettings>) =>
+    setSettings((prev) => ({ ...prev, lottery: { ...(prev.lottery || DEFAULT_LOTTERY), ...fields } }));
+  const addPrize = () =>
+    setLottery({ prizes: [...lottery.prizes, { id: `prize-${Date.now()}`, name: '', probability: 10 }] });
+  const updatePrize = (id: string, fields: Partial<LotteryPrize>) =>
+    setLottery({ prizes: lottery.prizes.map((p) => (p.id === id ? { ...p, ...fields } : p)) });
+  const removePrize = (id: string) =>
+    setLottery({ prizes: lottery.prizes.filter((p) => p.id !== id) });
+  const totalProb = lottery.prizes.reduce((s, p) => s + (Number(p.probability) || 0), 0);
 
   const [surveyItems, setSurveyItems] = useState<SurveyItem[]>(DEFAULT_SURVEY_ITEMS);
 
@@ -75,7 +141,7 @@ function AdminDashboardContent() {
   const [customerActive, setCustomerActive] = useState<boolean | null>(null);
   const { notice, showNotice, clearNotice } = useNotice();
 
-  const { changeTheme } = useTheme();
+  const { changeTheme, setCustomColor } = useTheme();
 
   useEffect(() => {
     const loggedIn = localStorage.getItem('customerLoggedIn') === 'true';
@@ -133,8 +199,11 @@ function AdminDashboardContent() {
         const res = await fetch(`/api/settings?customerId=${encodeURIComponent(customerId)}`);
         const data = await res.json();
         if (data && data.settings) {
-          setSettings(data.settings);
+          // 古いデータに lottery が無くてもデフォルト補完
+          setSettings({ ...data.settings, themeColor: data.settings.themeColor || "", lottery: normalizeLottery(data.settings.lottery) });
           setSurveyItems(normalizeSurveyItems(data.surveyItems));
+          // 保存済みカスタム色をプレビューへ反映
+          setCustomColor(data.settings.themeColor || null);
         }
       } catch {
         console.error("設定の読み込みに失敗しました");
@@ -181,7 +250,7 @@ function AdminDashboardContent() {
     });
   };
 
-  const updateSurveyItem = (id: number, fields: Partial<Pick<SurveyItem, 'text' | 'type' | 'options'>>) => {
+  const updateSurveyItem = (id: number, fields: Partial<Pick<SurveyItem, 'text' | 'type' | 'options' | 'multiple' | 'enabled'>>) => {
     setSurveyItems(surveyItems.map(item => item.id === id ? { ...item, ...fields } : item));
   };
 
@@ -286,8 +355,8 @@ function AdminDashboardContent() {
   if (customerActive === false) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 font-sans text-[var(--theme-text)] bg-[var(--theme-bg)]">
-        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-8 text-center space-y-4">
-          <h1 className="text-2xl font-black italic">この顧客URLは現在停止中です</h1>
+        <div className="max-w-md w-full bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-8 text-center space-y-4">
+          <h1 className="text-2xl font-black t-italic">この顧客URLは現在停止中です</h1>
           <p className="text-sm font-bold text-[var(--theme-text)]/70">管理者にお問い合わせください。</p>
         </div>
       </div>
@@ -307,8 +376,8 @@ function AdminDashboardContent() {
       {isSaving && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-300">
-            <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin"></div>
-            <p className="font-black italic text-xl text-black tracking-widest">SAVING...</p>
+            <div className="w-12 h-12 border-[length:var(--theme-bw)] border-black border-t-transparent rounded-full animate-spin"></div>
+            <p className="font-black t-italic text-xl text-black tracking-widest">SAVING...</p>
           </div>
         </div>
       )}
@@ -317,14 +386,14 @@ function AdminDashboardContent() {
 
         <header>
           <p className="text-xs font-black text-[var(--theme-text)] opacity-60 uppercase tracking-widest">Administrator</p>
-          <h1 className="text-4xl font-black italic">システム設定</h1>
+          <h1 className="text-4xl font-black t-italic">システム設定</h1>
         </header>
 
         {/* 1. 基本・マップ設定 */}
-        <section className="bg-[var(--theme-card-bg)] rounded-[2rem] border-3 border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black mb-6 flex items-center gap-2 italic">
+        <section className="bg-[var(--theme-card-bg)] rounded-[var(--theme-radius)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black mb-6 flex items-center gap-2 t-italic">
             <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
-            基本・マップ設定 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal italic">BASIC & MAP</span>
+            基本・マップ設定 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal t-italic">BASIC & MAP</span>
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -361,20 +430,22 @@ function AdminDashboardContent() {
         </section>
 
         {/* デザインテーマ選択 */}
-        <section className="bg-[var(--theme-card-bg)] rounded-[2rem] border-3 border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black mb-6 flex items-center gap-2 italic">
+        <section className="bg-[var(--theme-card-bg)] rounded-[var(--theme-radius)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black mb-6 flex items-center gap-2 t-italic">
             <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
-            デザインテーマ選択 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal italic">DESIGN THEME</span>
+            デザインテーマ選択 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal t-italic">DESIGN THEME</span>
           </h2>
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-            {[
-              { id: 'standard', name: '標準', color: 'bg-[#F9C11C]', text: 'BLACK' },
-              { id: 'minimal', name: 'シンプル', color: 'bg-white', border: 'border-gray-200', text: 'GRAY' },
-              { id: 'feminine', name: 'フェミニン', color: 'bg-[#FADADD]', text: 'PINK' },
-              { id: 'dark', name: 'ダーク', color: 'bg-[#121212]', border: 'border-[#D4AF37]', text: 'GOLD' },
-              { id: 'pop', name: 'ポップ', color: 'bg-[#3B82F6]', text: 'BLUE' },
-            ].map((t) => (
+            {([
+              // sw=スウォッチ色, ring=枠色, rad=角丸, sh=影サンプル
+              { id: 'standard', name: '標準\n（ブルータル）', sw: '#F9C11C', ring: '#000000', rad: '10px', sh: '4px 4px 0 #000000' },
+              { id: 'refined', name: 'リファインド', sw: '#F9C11C', ring: '#111111', rad: '14px', sh: '3px 3px 0 #111111' },
+              { id: 'minimal', name: 'ミニマル', sw: '#FFFFFF', ring: '#E5E7EB', rad: '18px', sh: '0 4px 12px rgba(0,0,0,.12)' },
+              { id: 'soft', name: 'ソフト', sw: '#FF8FA3', ring: '#F3D9CE', rad: '9999px', sh: '0 6px 14px rgba(255,143,163,.4)' },
+              { id: 'premium', name: 'プレミアム', sw: '#D4AF37', ring: '#3A3A42', rad: '12px', sh: '0 6px 16px rgba(0,0,0,.5)', dark: true },
+              { id: 'pop', name: 'ポップ\n（ブルー）', sw: '#3B82F6', ring: '#C7DCFB', rad: '14px', sh: '0 6px 14px rgba(59,130,246,.4)' },
+            ]).map((t) => (
               <button
                 key={t.id}
                 onClick={() => {
@@ -382,54 +453,118 @@ function AdminDashboardContent() {
                   changeTheme(t.id); // プレビュー反映
                 }}
                 className={`flex flex-col items-center gap-3 p-4 rounded-2xl border-2 transition-all duration-200 ${
-                  settings.themeName === t.id 
-                    ? 'border-[var(--theme-border)] bg-[var(--theme-text)]/5 shadow-[4px_4px_0px_var(--theme-border)] scale-105' 
+                  settings.themeName === t.id
+                    ? 'border-[var(--theme-border)] bg-[var(--theme-text)]/5 shadow-[var(--theme-shadow-sm)] scale-105'
                     : 'border-transparent bg-[var(--theme-card-bg)] hover:bg-[var(--theme-text)]/5 opacity-60'
                 }`}
               >
-                <div className={`w-12 h-12 rounded-full ${t.color} ${t.border || 'border-2 border-black'} shadow-sm`} />
-                <span className="text-[10px] font-black uppercase tracking-tighter text-center">{t.name}</span>
+                <div
+                  className="w-14 h-12 flex items-center justify-center"
+                  style={{ background: t.dark ? '#0E0E12' : '#FBFBFC', borderRadius: '10px' }}
+                >
+                  <div style={{ width: 30, height: 30, background: t.sw, border: `2px solid ${t.ring}`, borderRadius: t.rad, boxShadow: t.sh }} />
+                </div>
+                <span className="text-[10px] font-black tracking-tighter text-center whitespace-pre-line leading-tight">{t.name}</span>
                 {settings.themeName === t.id && (
                   <span className="text-[10px] text-[var(--theme-text)] font-bold">●選択中</span>
                 )}
               </button>
             ))}
           </div>
-          <p className="mt-4 text-[10px] text-[var(--theme-text)] opacity-60 font-bold italic text-center">※選択したテーマがアンケート画面の配色・形状に即座に反映されます。</p>
+          <p className="mt-4 text-[10px] text-[var(--theme-text)] opacity-60 font-bold t-italic text-center">※選択したテーマがアンケート画面の配色・形状に即座に反映されます。</p>
+
+          {/* アクセント色のカスタム */}
+          <div className="mt-6 pt-6 border-t-2 border-[var(--theme-border)]">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] font-black uppercase tracking-widest text-[var(--theme-text)]/70">アクセント色（任意）</span>
+              {settings.themeColor && (
+                <button
+                  onClick={() => { setSettings({ ...settings, themeColor: "" }); setCustomColor(null); }}
+                  className="text-[10px] font-black text-[var(--theme-text)]/50 underline"
+                >
+                  テーマ標準色に戻す
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-[var(--theme-text)]/50 mb-3">ボタンやハイライトの色をお店のブランドカラーに変更できます（形・背景はテーマのまま）。</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {['#F9C11C','#FF8FA3','#3B82F6','#22C55E','#A855F7','#EF4444','#14B8A6','#F97316','#EC4899','#111111'].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => { setSettings({ ...settings, themeColor: c }); setCustomColor(c); }}
+                  className={`w-9 h-9 rounded-full border-2 transition-all ${settings.themeColor?.toLowerCase() === c.toLowerCase() ? 'border-[var(--theme-text)] scale-110' : 'border-[var(--theme-border)]'}`}
+                  style={{ background: c }}
+                  aria-label={`色 ${c}`}
+                />
+              ))}
+              {/* 自由な色 */}
+              <label className="flex items-center gap-2 ml-1 cursor-pointer">
+                <span className="text-[10px] font-black text-[var(--theme-text)]/60">その他</span>
+                <input
+                  type="color"
+                  value={settings.themeColor || '#F9C11C'}
+                  onChange={(e) => { setSettings({ ...settings, themeColor: e.target.value }); setCustomColor(e.target.value); }}
+                  className="w-9 h-9 rounded-lg border-2 border-[var(--theme-border)] cursor-pointer bg-transparent"
+                />
+              </label>
+            </div>
+          </div>
         </section>
 
         {/* 2. アンケート項目設定 */}
-        <section className="bg-[var(--theme-card-bg)] rounded-[2rem] border-3 border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
+        <section className="bg-[var(--theme-card-bg)] rounded-[var(--theme-radius)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 shadow-[var(--theme-shadow)]">
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center items-start gap-3 mb-6">
-            <h2 className="text-xl font-black flex items-center gap-2 italic leading-tight break-words">
+            <h2 className="text-xl font-black flex items-center gap-2 t-italic leading-tight break-words">
               <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
-              アンケート項目設定 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal italic">SURVEY ITEMS</span>
+              アンケート項目設定 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal t-italic">SURVEY ITEMS</span>
             </h2>
-            <button onClick={addSurveyItem} className={`w-full sm:w-auto text-center whitespace-normal leading-tight bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-2 border-[var(--theme-border)] px-4 py-2 rounded-xl font-black text-xs shadow-[3px_3px_0px_var(--theme-border)]`}>
+            <button onClick={addSurveyItem} className={`w-full sm:w-auto text-center whitespace-normal leading-tight bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-2 border-[var(--theme-border)] px-4 py-2 rounded-xl font-black text-xs shadow-[var(--theme-shadow-sm)]`}>
               ＋ 項目を追加
             </button>
           </div>
           <div className="grid grid-cols-1 gap-4">
-            {surveyItems.map((item, index) => (
-              <div key={item.id} className="flex flex-col md:flex-row gap-3 bg-[var(--theme-text)]/5 p-4 border-2 border-[var(--theme-border)] rounded-xl">
+            {surveyItems.map((item, index) => {
+              const isEnabled = item.enabled !== false;
+              const isFixed = index === 0; // 1つ目は固定（必須・★評価・常に表示・並び替え不可）
+              return (
+              <div key={item.id} className={`flex flex-col md:flex-row gap-3 p-4 border-2 rounded-xl transition-all ${isFixed ? 'border-[var(--theme-primary)]' : 'border-[var(--theme-border)]'} ${isEnabled ? 'bg-[var(--theme-text)]/5' : 'bg-[var(--theme-text)]/[0.02] opacity-60'}`}>
                 <div className="flex flex-wrap items-center gap-2 w-full">
                   <span className="text-[10px] font-black text-[var(--theme-text)] opacity-60 w-4">{index + 1}</span>
-                  <button
-                    type="button"
-                    onClick={() => moveSurveyItem(index, 'up')}
-                    disabled={index === 0}
-                    className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveSurveyItem(index, 'down')}
-                    disabled={index === surveyItems.length - 1}
-                    className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
-                  >
-                    ↓
-                  </button>
+                  {!isFixed && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => moveSurveyItem(index, 'up')}
+                        disabled={index <= 1}
+                        className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveSurveyItem(index, 'down')}
+                        disabled={index === surveyItems.length - 1}
+                        className="px-2 py-1 rounded-lg border-2 border-[var(--theme-border)] text-xs font-black disabled:opacity-30"
+                      >
+                        ↓
+                      </button>
+                    </>
+                  )}
+                  {isFixed ? (
+                    <span className="ml-auto md:ml-2 flex items-center gap-1.5 px-3 py-1 rounded-full border-2 border-[var(--theme-primary)] bg-[var(--theme-primary)] text-[var(--theme-on-primary)] text-[10px] font-black">
+                      🔒 必須項目
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => updateSurveyItem(item.id, { enabled: !isEnabled })}
+                      className={`ml-auto md:ml-2 flex items-center gap-1.5 px-3 py-1 rounded-full border-2 border-[var(--theme-border)] text-[10px] font-black transition-all ${isEnabled ? 'bg-[var(--theme-primary)] text-[var(--theme-on-primary)]' : 'bg-[var(--theme-card-bg)] text-[var(--theme-text)]/50'}`}
+                      title={isEnabled ? '非表示にする' : '表示する'}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${isEnabled ? 'bg-[var(--theme-on-primary)]' : 'bg-[var(--theme-text)]/30'}`} />
+                      {isEnabled ? '表示中' : '非表示'}
+                    </button>
+                  )}
                 </div>
                 <div className="w-full">
                   <input
@@ -439,35 +574,56 @@ function AdminDashboardContent() {
                     className="w-full bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-3 py-2 rounded-lg font-bold text-sm leading-relaxed outline-none"
                     placeholder="質問文を入力してください"
                   />
+                  {isFixed && (
+                    <p className="text-[9px] text-[var(--theme-text)]/50 mt-1">※満足度ヒアリング用の必須質問です。質問文のみ編集できます</p>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-                  <select
-                    value={item.type}
-                    onChange={(e) => {
-                      const nextType = e.target.value;
-                      if (nextType === 'choice') {
-                        updateSurveyItem(item.id, {
-                          type: nextType,
-                          options: item.options && item.options.length > 0 ? item.options : ['はい', 'いいえ'],
-                        });
-                        return;
-                      }
-                      updateSurveyItem(item.id, { type: nextType });
-                    }}
-                    className="w-full sm:w-auto max-w-full bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-3 py-1 rounded-lg font-black text-xs outline-none"
-                  >
-                    <option value="rating">★評価(1-5)</option>
-                    <option value="free">自由入力</option>
-                    <option value="choice">選択肢</option>
-                  </select>
-                  <button onClick={() => removeSurveyItem(item.id)} className="text-gray-300 hover:text-red-500 font-black px-2 whitespace-nowrap">×</button>
+                  {isFixed ? (
+                    <span className="px-3 py-1 rounded-lg border-2 border-[var(--theme-border)] bg-[var(--theme-card-bg)] font-black text-xs">★評価(1-5)</span>
+                  ) : (
+                    <>
+                      <select
+                        value={item.type}
+                        onChange={(e) => {
+                          const nextType = e.target.value;
+                          if (nextType === 'choice') {
+                            updateSurveyItem(item.id, {
+                              type: nextType,
+                              options: item.options && item.options.length > 0 ? item.options : ['はい', 'いいえ'],
+                            });
+                            return;
+                          }
+                          updateSurveyItem(item.id, { type: nextType });
+                        }}
+                        className="w-full sm:w-auto max-w-full bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-3 py-1 rounded-lg font-black text-xs outline-none"
+                      >
+                        <option value="rating">★評価(1-5)</option>
+                        <option value="free">自由入力</option>
+                        <option value="choice">選択肢</option>
+                      </select>
+                      <button onClick={() => removeSurveyItem(item.id)} className="text-gray-300 hover:text-red-500 font-black px-2 whitespace-nowrap">×</button>
+                    </>
+                  )}
                 </div>
-                {item.type === 'choice' && (
-                  <div className="w-full md:basis-full mt-2 md:ml-0">
-                    <details className="bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] rounded-xl p-3">
+                {!isFixed && item.type === 'choice' && (
+                  <div className="w-full md:basis-full mt-2 md:ml-0 space-y-2">
+                    {/* 複数選択トグル（常時表示） */}
+                    <label className="flex items-center gap-2 p-3 rounded-xl border-2 border-[var(--theme-border)] bg-[var(--theme-card-bg)] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(item.multiple)}
+                        onChange={(e) => updateSurveyItem(item.id, { multiple: e.target.checked })}
+                        className="w-5 h-5"
+                      />
+                      <span className="text-xs font-black">☑ 複数選択を許可する</span>
+                      <span className="text-[10px] text-[var(--theme-text)]/50">回答者が複数の選択肢を選べます</span>
+                    </label>
+
+                    <details className="bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] rounded-xl p-3" open>
                       <summary className="cursor-pointer list-none flex items-center justify-between gap-2">
                         <span className="text-[10px] font-black text-[var(--theme-text)]/70 uppercase">選択肢を編集</span>
-                        <span className="text-[10px] font-black text-[var(--theme-text)]/60">{(item.options || []).length}件</span>
+                        <span className="text-[10px] font-black text-[var(--theme-text)]/60">{(item.options || []).length}件{item.multiple ? '（複数選択可）' : ''}</span>
                       </summary>
 
                       <div className="space-y-2 mt-3">
@@ -526,31 +682,39 @@ function AdminDashboardContent() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
         {/* 3. AI設定 */}
-        <section className="bg-[var(--theme-card-bg)] rounded-[2rem] border-3 border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black mb-6 flex items-center gap-2 italic">
+        <section className="bg-[var(--theme-card-bg)] rounded-[var(--theme-radius)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black mb-6 flex items-center gap-2 t-italic">
             <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
-            AI口コミ生成テイスト <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal italic">AI ENGINE</span>
+            AI口コミ生成 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal t-italic">AI ENGINE</span>
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">生成文字数目安</label>
-              <input type="number" value={settings.aiReviewLength} onChange={(e) => setSettings({ ...settings, aiReviewLength: e.target.value })} className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold outline-none" />
+              <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">文章の長さ</label>
+              <select
+                value={settings.aiReviewLength}
+                onChange={(e) => setSettings({ ...settings, aiReviewLength: e.target.value })}
+                className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold outline-none"
+              >
+                <option value="short">短め（80〜120字）</option>
+                <option value="medium">標準（150〜200字）</option>
+                <option value="long">長め（250〜350字）</option>
+              </select>
             </div>
 
             <div>
-              <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">口コミのテイスト（5種）</label>
-              {/* 口コミのテイスト選択部分 */}
+              <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">口コミのテイスト</label>
               <select
                 value={settings.aiReviewTaste}
                 onChange={(e) => setSettings({ ...settings, aiReviewTaste: e.target.value })}
                 className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold outline-none"
               >
-                <option value="random">🎲 ランダム（AIが自動で選択）</option> {/* 追加 */}
+                <option value="random">🎲 ランダム（AIが自動で選択）</option>
                 <option value="friendly">親しみやすい（自然な会話調）</option>
                 <option value="polite">丁寧・誠実（しっかりした敬語）</option>
                 <option value="energetic">元気・ワクワク（ポジティブ全開）</option>
@@ -558,14 +722,157 @@ function AdminDashboardContent() {
                 <option value="minimal">シンプル（短く端的に）</option>
               </select>
             </div>
+
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-3 p-3 bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.aiUseEmoji)}
+                  onChange={(e) => setSettings({ ...settings, aiUseEmoji: e.target.checked })}
+                  className="w-5 h-5"
+                />
+                <span className="text-sm font-black">絵文字を使う 😊</span>
+                <span className="text-[10px] text-[var(--theme-text)]/50">カジュアル系のお店向け。✨🎉などを自然挿入</span>
+              </label>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">推奨ワード（積極的に使ってほしい言葉）</label>
+              <textarea
+                rows={3}
+                value={settings.aiPreferredWords}
+                onChange={(e) => setSettings({ ...settings, aiPreferredWords: e.target.value })}
+                placeholder={"例（改行 or カンマ区切り）：\n癒しの空間\n落ち着く\n丁寧な施術"}
+                className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold text-sm outline-none resize-none"
+              />
+              <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">お店のキャッチコピーや強みなど</p>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">禁止ワード（使ってほしくない言葉）</label>
+              <textarea
+                rows={3}
+                value={settings.aiBannedWords}
+                onChange={(e) => setSettings({ ...settings, aiBannedWords: e.target.value })}
+                placeholder={"例（改行 or カンマ区切り）：\n激安\n格安\n世界一"}
+                className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold text-sm outline-none resize-none"
+              />
+              <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">誇大表現や避けたい単語など</p>
+            </div>
           </div>
         </section>
 
-        {/* 4. 低評価時のメッセージ */}
-        <section className="bg-[var(--theme-card-bg)] rounded-[2rem] border-3 border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black mb-6 flex items-center gap-2 italic">
+        {/* 3.5 抽選機能 */}
+        <section className="bg-[var(--theme-card-bg)] rounded-[var(--theme-radius)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black mb-6 flex items-center gap-2 t-italic">
             <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
-            低評価時のメッセージ <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal italic">LOW RATING MESSAGE</span>
+            抽選機能 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal t-italic">LOTTERY</span>
+          </h2>
+
+          {/* ON/OFF */}
+          <label className="flex items-center gap-3 p-3 bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] rounded-xl cursor-pointer mb-6">
+            <input
+              type="checkbox"
+              checked={Boolean(lottery.enabled)}
+              onChange={(e) => setLottery({ enabled: e.target.checked })}
+              className="w-5 h-5"
+            />
+            <span className="text-sm font-black">抽選を有効にする 🎰</span>
+            <span className="text-[10px] text-[var(--theme-text)]/50">アンケート回答後にルーレット／くじを表示</span>
+          </label>
+
+          {lottery.enabled && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">アニメーション</label>
+                  <select
+                    value={lottery.animation}
+                    onChange={(e) => setLottery({ animation: e.target.value as LotterySettings['animation'] })}
+                    className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold outline-none"
+                  >
+                    <option value="roulette">🎡 ルーレット（回転して止まる）</option>
+                    <option value="scratch">🎁 くじ（箱を開ける）</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">表示タイミング</label>
+                  <select
+                    value={lottery.timing}
+                    onChange={(e) => setLottery({ timing: e.target.value as LotterySettings['timing'] })}
+                    className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold outline-none"
+                  >
+                    <option value="all">全員（回答送信後すぐ）</option>
+                    <option value="high">高評価の人だけ</option>
+                    <option value="low">低評価の人だけ</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 景品リスト */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 uppercase">景品と当選確率</label>
+                  <span className={`text-[10px] font-black ${totalProb > 100 ? 'text-red-500' : 'text-[var(--theme-text)]/60'}`}>
+                    当たり合計 {totalProb}% ／ はずれ {Math.max(0, 100 - totalProb)}%
+                  </span>
+                </div>
+                {totalProb > 100 && (
+                  <p className="text-[10px] font-black text-red-500 mb-2">⚠ 合計が100%を超えています。後ろの景品は当たりにくくなります。</p>
+                )}
+                <div className="space-y-2">
+                  {lottery.prizes.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] rounded-xl p-2">
+                      <input
+                        type="text"
+                        value={p.name}
+                        onChange={(e) => updatePrize(p.id, { name: e.target.value })}
+                        placeholder="景品名（例: ドリンク1杯無料）"
+                        className="flex-1 min-w-0 bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-3 py-2 rounded-lg font-bold text-sm outline-none"
+                      />
+                      <div className="flex items-center gap-1 shrink-0">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={p.probability}
+                          onChange={(e) => updatePrize(p.id, { probability: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                          className="w-16 bg-[var(--theme-card-bg)] border-2 border-[var(--theme-border)] px-2 py-2 rounded-lg font-black text-sm outline-none text-center"
+                        />
+                        <span className="text-xs font-black">%</span>
+                      </div>
+                      <button onClick={() => removePrize(p.id)} className="shrink-0 text-gray-300 hover:text-red-500 font-black px-2">×</button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={addPrize}
+                  className="mt-2 px-3 py-2 rounded-lg border-2 border-[var(--theme-border)] font-black text-xs"
+                >
+                  ＋ 景品を追加
+                </button>
+              </div>
+
+              {/* はずれメッセージ */}
+              <div>
+                <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">はずれ時のメッセージ</label>
+                <textarea
+                  rows={2}
+                  value={lottery.loseMessage}
+                  onChange={(e) => setLottery({ loseMessage: e.target.value })}
+                  className="w-full bg-[var(--theme-text)]/5 border-2 border-[var(--theme-border)] p-4 rounded-xl font-bold text-sm outline-none resize-none"
+                  placeholder="またのご参加をお待ちしております"
+                />
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* 4. 低評価時のメッセージ */}
+        <section className="bg-[var(--theme-card-bg)] rounded-[var(--theme-radius)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black mb-6 flex items-center gap-2 t-italic">
+            <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
+            低評価時のメッセージ <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal t-italic">LOW RATING MESSAGE</span>
           </h2>
           <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">星が基準より低いお客様に表示する内容</label>
           <textarea
@@ -578,10 +885,10 @@ function AdminDashboardContent() {
         </section>
 
         {/* 5. サンクスページ設定 */}
-        <section className="bg-[var(--theme-card-bg)] rounded-[2rem] border-3 border-[var(--theme-border)] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black mb-6 flex items-center gap-2 italic">
+        <section className="bg-[var(--theme-card-bg)] rounded-[var(--theme-radius)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black mb-6 flex items-center gap-2 t-italic">
             <span className={`w-2 h-6 bg-[var(--theme-primary)] block border border-[var(--theme-border)]`} />
-            完了画面の設定 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal italic">THANK YOU PAGE</span>
+            完了画面の設定 <span className="text-[10px] text-[var(--theme-text)] opacity-60 ml-2 font-normal t-italic">THANK YOU PAGE</span>
           </h2>
           <label className="block text-[10px] font-black text-[var(--theme-text)] opacity-60 mb-2 uppercase">高評価だったお客様に表示する内容</label>
           <textarea
@@ -593,8 +900,8 @@ function AdminDashboardContent() {
         </section>
 
         {/* Google連携 */}
-        <section className="bg-[var(--theme-card-bg)] border-3 border-[var(--theme-border)] rounded-[2rem] p-8 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black italic mb-4">Gmail連携</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-8 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black t-italic mb-4">Gmail連携</h2>
           <p className="text-xs text-[var(--theme-text)]/60 mb-4">アンケート送信メールをあなたのGmailアカウントから送信できます。</p>
           {googleConnected ? (
             <div className="flex items-center justify-between gap-4">
@@ -616,7 +923,7 @@ function AdminDashboardContent() {
           ) : (
             <a
               href={`/api/google/auth?customerId=${encodeURIComponent(customerId)}`}
-              className="inline-block bg-[var(--theme-text)] text-[var(--theme-bg)] px-8 py-4 rounded-2xl font-black text-sm shadow-[6px_6px_0px_var(--theme-border)] active:scale-95 transition-all"
+              className="inline-block bg-[var(--theme-text)] text-[var(--theme-bg)] px-8 py-4 rounded-2xl font-black text-sm shadow-[var(--theme-shadow-md)] active:scale-95 transition-all"
             >
               Googleアカウントを連携する
             </a>
@@ -626,12 +933,12 @@ function AdminDashboardContent() {
         {/* 下部ボタン */}
         <div className="flex flex-col md:flex-row items-center justify-center gap-6 pb-20">
           <Link href={`/main?customerId=${encodeURIComponent(customerId)}`} className="w-full md:w-auto order-2 md:order-1">
-            <button className="w-full md:w-auto bg-[var(--theme-card-bg)] border-3 border-[var(--theme-border)] px-12 py-6 rounded-[2rem] font-black text-xl shadow-[8px_8px_0px_var(--theme-border)] active:scale-95 transition-all">← 戻る</button>
+            <button className="w-full md:w-auto bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] px-12 py-6 rounded-[var(--theme-radius)] font-black text-xl shadow-[var(--theme-shadow)] active:scale-95 transition-all">← 戻る</button>
           </Link>
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className={`w-full md:w-auto order-1 md:order-2 bg-[var(--theme-text)] text-[var(--theme-bg)] px-20 py-6 rounded-[2rem] font-black text-xl shadow-[8px_8px_0px_var(--theme-primary)] active:scale-95 transition-all ${isSaving ? 'opacity-50' : ''}`}
+            className={`w-full md:w-auto order-1 md:order-2 bg-[var(--theme-text)] text-[var(--theme-bg)] px-20 py-6 rounded-[var(--theme-radius)] font-black text-xl shadow-[var(--theme-shadow-accent)] active:scale-95 transition-all ${isSaving ? 'opacity-50' : ''}`}
           >
             {isSaving ? "保存中..." : "設定を保存して反映"}
           </button>

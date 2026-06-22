@@ -31,8 +31,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'customerId is required' }, { status: 400 });
     }
 
-    const { rows } = await sql<{ customer_id: string; is_active: boolean | null }>`
-      SELECT customer_id, is_active
+    const { rows } = await sql<{ customer_id: string; customer_name: string | null; is_active: boolean | null }>`
+      SELECT customer_id, customer_name, is_active
       FROM customer_accounts
       WHERE customer_id = ${customerId}
       LIMIT 1;
@@ -46,6 +46,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       exists: true,
       customerId: row.customer_id,
+      customerName: row.customer_name || '',
       isActive: row.is_active !== false,
     });
   } catch (error) {

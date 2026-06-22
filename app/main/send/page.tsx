@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import NoticeToast from '../../components/NoticeToast';
@@ -46,7 +46,6 @@ function SendSurveyContent() {
   const [sendMessage, setSendMessage] = useState('');
   const [messageSubject, setMessageSubject] = useState('');
   const [emailHtml, setEmailHtml] = useState('');
-  const [showPreview, setShowPreview] = useState(false);
   const [isSyncingFriends, setIsSyncingFriends] = useState(false);
   const [templateType, setTemplateType] = useState<'survey' | 'campaign' | 'aftercare'>('survey');
   const [campaignText, setCampaignText] = useState('');
@@ -59,6 +58,11 @@ function SendSurveyContent() {
   const [lineQuota, setLineQuota] = useState<{ configured: boolean; used?: number; limit?: number } | null>(null);
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
   const [gmailEmail, setGmailEmail] = useState('');
+
+  // Refs & CSV help
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const [showCsvHelp, setShowCsvHelp] = useState(false);
 
   useEffect(() => {
     const loggedIn = localStorage.getItem('customerLoggedIn') === 'true';
@@ -78,6 +82,85 @@ function SendSurveyContent() {
   }, [authChecking, customerId]);
 
   if (authChecking) return null;
+
+  // CSV/テキスト一括取り込み
+  const parseRecipients = (text: string): string[] => {
+    // カンマ、セミコロン、タブ、改行で分割し、前後空白除去、空行除去
+    return text
+      .split(/[,;\t\n\r]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  };
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      if (!text) return;
+      // CSVの各行から送信先を抽出（1列目 or email/phone列を自動検出）
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (!lines.length) return;
+
+      // ヘッダー行の検出
+      const header = lines[0].toLowerCase();
+      const isEmail = sendChannel === 'email';
+      const cols = header.split(/[,\t]/);
+      let targetCol = 0; // デフォルト: 1列目
+
+      if (isEmail) {
+        const emailIdx = cols.findIndex((c) => c.includes('email') || c.includes('メール') || c.includes('mail'));
+        if (emailIdx >= 0) targetCol = emailIdx;
+      } else {
+        const phoneIdx = cols.findIndex((c) => c.includes('phone') || c.includes('電話') || c.includes('tel') || c.includes('sms'));
+        if (phoneIdx >= 0) targetCol = phoneIdx;
+      }
+
+      // ヘッダー行をスキップするかどうか判定
+      const firstVal = cols[targetCol]?.trim() || '';
+      const hasHeader = isEmail
+        ? !firstVal.includes('@')
+        : !/^\+?\d/.test(firstVal);
+
+      const dataLines = hasHeader ? lines.slice(1) : lines;
+      const extracted = dataLines
+        .map((line) => {
+          const parts = line.split(/[,\t]/);
+          return (parts[targetCol] || '').trim().replace(/^["']|["']$/g, '');
+        })
+        .filter(Boolean);
+
+      if (!extracted.length) {
+        showNotice('CSVから送信先を読み取れませんでした', 'error');
+        return;
+      }
+
+      // 既存の送信先にマージ（重複除去）
+      const existing = parseRecipients(sendRecipients);
+      const merged = [...new Set([...existing, ...extracted])];
+      setSendRecipients(merged.join('\n'));
+      showNotice(`${extracted.length}件の送信先を取り込みました`, 'success');
+    };
+    reader.readAsText(file);
+    if (csvInputRef.current) csvInputRef.current.value = '';
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = e.clipboardData.getData('text');
+    if (!pasted) return;
+    // タブ区切り（Excelからのペースト）を検出
+    if (pasted.includes('\t')) {
+      e.preventDefault();
+      const extracted = parseRecipients(pasted);
+      const existing = parseRecipients(sendRecipients);
+      const merged = [...new Set([...existing, ...extracted])];
+      setSendRecipients(merged.join('\n'));
+      showNotice(`${extracted.length}件の送信先を貼り付けました`, 'success');
+    }
+  };
+
+  const recipientCount = parseRecipients(sendRecipients).length;
 
   const applyTemplate = async () => {
     setIsGenerating(true);
@@ -112,8 +195,21 @@ function SendSurveyContent() {
     }
   };
 
+  // Sync editable iframe content back to emailHtml state
+  const syncIframeContent = () => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentDocument) return;
+    const html = '<!DOCTYPE html>' + iframe.contentDocument.documentElement.outerHTML;
+    setEmailHtml(html);
+  };
+
   const handleSend = async () => {
-    if (!sendMessage.trim()) {
+    // Sync iframe content before sending
+    if (sendChannel === 'email' && emailHtml) {
+      syncIframeContent();
+    }
+
+    if (!sendMessage.trim() && !emailHtml.trim()) {
       setSendResult({ success: false, message: '送信内容を入力してください' });
       return;
     }
@@ -132,10 +228,16 @@ function SendSurveyContent() {
         return;
       }
 
+      // Get latest HTML from iframe
+      let finalHtml = emailHtml;
+      if (sendChannel === 'email' && iframeRef.current?.contentDocument) {
+        finalHtml = '<!DOCTYPE html>' + iframeRef.current.contentDocument.documentElement.outerHTML;
+      }
+
       const res = await fetch('/api/send-survey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage, subject: messageSubject, html: emailHtml || undefined }),
+        body: JSON.stringify({ customerId, channel: sendChannel, recipients, message: sendMessage, subject: messageSubject, html: finalHtml || undefined }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -185,6 +287,49 @@ function SendSurveyContent() {
     { key: 'line_push', label: 'LINE個別' },
   ];
 
+  // Inject contenteditable styles into the iframe
+  const setupEditableIframe = (iframe: HTMLIFrameElement | null) => {
+    if (!iframe) return;
+    const onLoad = () => {
+      const doc = iframe.contentDocument;
+      if (!doc) return;
+      // Make text elements editable
+      const editableSelectors = 'h1, h2, h3, p, td, a, span, strong';
+      doc.querySelectorAll(editableSelectors).forEach((el) => {
+        const htmlEl = el as HTMLElement;
+        // Skip elements that are purely structural
+        if (htmlEl.children.length > 0 && !htmlEl.textContent?.trim()) return;
+        htmlEl.contentEditable = 'true';
+        htmlEl.style.outline = 'none';
+        htmlEl.style.cursor = 'text';
+        htmlEl.addEventListener('focus', () => {
+          htmlEl.style.outline = '2px solid #4A90E2';
+          htmlEl.style.outlineOffset = '2px';
+          htmlEl.style.borderRadius = '4px';
+        });
+        htmlEl.addEventListener('blur', () => {
+          htmlEl.style.outline = 'none';
+          htmlEl.style.outlineOffset = '0';
+        });
+      });
+      // Add editing hint style
+      const style = doc.createElement('style');
+      style.textContent = `
+        [contenteditable="true"]:hover {
+          outline: 1px dashed #ccc !important;
+          outline-offset: 2px;
+          border-radius: 4px;
+        }
+      `;
+      doc.head.appendChild(style);
+    };
+    iframe.addEventListener('load', onLoad);
+    // If already loaded
+    if (iframe.contentDocument?.readyState === 'complete') {
+      onLoad();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[var(--theme-bg)] text-[var(--theme-text)] font-sans">
       {notice && <NoticeToast message={notice.message} variant={notice.variant} onClose={clearNotice} />}
@@ -193,20 +338,28 @@ function SendSurveyContent() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl md:text-3xl font-black italic tracking-tighter">アンケート送信</h1>
+            <h1 className="text-2xl md:text-3xl font-black t-italic tracking-tighter">アンケート送信</h1>
             <p className="text-[10px] font-black text-[var(--theme-text)]/40 uppercase tracking-widest mt-1">Send Survey</p>
           </div>
-          <Link
-            href={`/main?customerId=${encodeURIComponent(customerId)}`}
-            className="px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] text-xs font-black"
-          >
-            ← 戻る
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href={`/main/send/history?customerId=${encodeURIComponent(customerId)}`}
+              className="px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] text-xs font-black"
+            >
+              送信履歴
+            </Link>
+            <Link
+              href={`/main?customerId=${encodeURIComponent(customerId)}`}
+              className="px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] text-xs font-black"
+            >
+              ← 戻る
+            </Link>
+          </div>
         </div>
 
         {/* 残送信数ゲージ */}
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-5 shadow-[8px_8px_0px_var(--theme-border)] mb-6">
-          <h2 className="text-[10px] font-black italic uppercase mb-3 text-[var(--theme-text)]/60">今月の残送信数</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-5 shadow-[var(--theme-shadow)] mb-6">
+          <h2 className="text-[10px] font-black t-italic uppercase mb-3 text-[var(--theme-text)]/60">今月の残送信数</h2>
           <div className="flex gap-4">
             <QuotaGauge label="SMS" used={quotas?.sms?.used || 0} limit={quotas?.sms?.limit || 100} color="#3B82F6" />
             <QuotaGauge label="メール" used={quotas?.email?.used || 0} limit={quotas?.email?.limit || 3000} color="#10B981" />
@@ -220,16 +373,16 @@ function SendSurveyContent() {
         </section>
 
         {/* チャネル選択 */}
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] mb-6">
-          <h2 className="text-sm font-black italic uppercase mb-4">送信方法を選択</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] mb-6">
+          <h2 className="text-sm font-black t-italic uppercase mb-4">送信方法を選択</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {channels.map((ch) => (
               <button
                 key={ch.key}
                 onClick={() => { setSendChannel(ch.key); setSendResult(null); }}
-                className={`p-4 rounded-2xl border-[3px] font-black text-xs transition-all text-center ${
+                className={`p-4 rounded-2xl border-[length:var(--theme-bw)] font-black text-xs transition-all text-center ${
                   sendChannel === ch.key
-                    ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 shadow-[4px_4px_0px_var(--theme-border)]'
+                    ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 shadow-[var(--theme-shadow-sm)]'
                     : 'border-[var(--theme-border)]'
                 }`}
               >
@@ -241,23 +394,70 @@ function SendSurveyContent() {
         </section>
 
         {/* 送信先 */}
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] mb-6">
-          <h2 className="text-sm font-black italic uppercase mb-4">送信先</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] mb-6">
+          <h2 className="text-sm font-black t-italic uppercase mb-4">送信先</h2>
           {sendChannel === 'sms' && (
-            <textarea
-              value={sendRecipients}
-              onChange={(e) => setSendRecipients(e.target.value)}
-              placeholder={"+8190xxxxxxxx\n+8180xxxxxxxx"}
-              rows={3}
-              className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
-            />
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <input ref={csvInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCsvUpload} className="hidden" />
+                <button
+                  onClick={() => csvInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg border-2 border-[var(--theme-border)] text-[10px] font-black"
+                >
+                  CSVから取り込み
+                </button>
+                <button
+                  onClick={() => setShowCsvHelp(!showCsvHelp)}
+                  className="w-5 h-5 rounded-full border-2 border-[var(--theme-border)] text-[10px] font-black flex items-center justify-center text-[var(--theme-text)]/50"
+                  title="CSVフォーマットの説明"
+                >
+                  ?
+                </button>
+                {recipientCount > 0 && (
+                  <span className="text-[10px] font-black text-[var(--theme-primary)]">{recipientCount}件</span>
+                )}
+              </div>
+              {showCsvHelp && (
+                <div className="mb-3 p-4 rounded-xl bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] text-[11px] text-[var(--theme-text)]/70 space-y-2">
+                  <p className="font-black text-[var(--theme-text)]">CSVファイルの作り方</p>
+                  <p>電話番号が含まれた列を自動検出します。ヘッダー行は自動スキップされます。</p>
+                  <div className="bg-[var(--theme-card-bg)] rounded-lg p-3 font-mono text-[10px] space-y-0.5">
+                    <p className="text-[var(--theme-text)]/40">--- パターン1: 電話番号だけ ---</p>
+                    <p>+8190xxxx0001</p>
+                    <p>+8180xxxx0002</p>
+                  </div>
+                  <div className="bg-[var(--theme-card-bg)] rounded-lg p-3 font-mono text-[10px] space-y-0.5">
+                    <p className="text-[var(--theme-text)]/40">--- パターン2: ヘッダー付きCSV ---</p>
+                    <p>名前,電話番号</p>
+                    <p>山田太郎,+819012345678</p>
+                    <p>佐藤花子,+818098765432</p>
+                  </div>
+                  <div className="bg-[var(--theme-card-bg)] rounded-lg p-3 font-mono text-[10px] space-y-0.5">
+                    <p className="text-[var(--theme-text)]/40">--- パターン3: 複数列CSV ---</p>
+                    <p>id,name,phone,email</p>
+                    <p>1,山田太郎,+819012345678,yamada@example.com</p>
+                    <p>2,佐藤花子,+818098765432,sato@example.com</p>
+                  </div>
+                  <p className="text-[9px] text-[var(--theme-text)]/40">「電話」「phone」「tel」「sms」を含む列名を自動検出します。該当列がない場合は1列目を使用します。Excelから直接コピー&ペーストも可能です。</p>
+                </div>
+              )}
+              <textarea
+                value={sendRecipients}
+                onChange={(e) => setSendRecipients(e.target.value)}
+                onPaste={handlePaste}
+                placeholder={"+8190xxxxxxxx\n+8180xxxxxxxx\n\nExcelからの貼り付け・CSV取り込みも可能"}
+                rows={3}
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
+              />
+              <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">1行1件、またはカンマ/タブ区切り。Excelからの貼り付けにも対応</p>
+            </div>
           )}
           {sendChannel === 'email' && gmailConnected === false && (
             <div className="text-center py-4">
               <p className="text-sm font-black text-red-500 mb-2">Gmail連携が必要です</p>
               <a
                 href={`/main/settings?customerId=${encodeURIComponent(customerId)}`}
-                className="inline-block px-6 py-3 rounded-xl border-[3px] border-[var(--theme-border)] text-xs font-black"
+                className="inline-block px-6 py-3 rounded-xl border-[length:var(--theme-bw)] border-[var(--theme-border)] text-xs font-black"
               >
                 設定画面でGoogleアカウントを連携する →
               </a>
@@ -266,13 +466,58 @@ function SendSurveyContent() {
           {sendChannel === 'email' && gmailConnected !== false && (
             <div>
               {gmailEmail && <p className="text-[10px] font-black text-green-600 mb-2">送信元: {gmailEmail}</p>}
+              <div className="flex items-center gap-2 mb-2">
+                <input ref={csvInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCsvUpload} className="hidden" />
+                <button
+                  onClick={() => csvInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg border-2 border-[var(--theme-border)] text-[10px] font-black"
+                >
+                  CSVから取り込み
+                </button>
+                <button
+                  onClick={() => setShowCsvHelp(!showCsvHelp)}
+                  className="w-5 h-5 rounded-full border-2 border-[var(--theme-border)] text-[10px] font-black flex items-center justify-center text-[var(--theme-text)]/50"
+                  title="CSVフォーマットの説明"
+                >
+                  ?
+                </button>
+                {recipientCount > 0 && (
+                  <span className="text-[10px] font-black text-[var(--theme-primary)]">{recipientCount}件</span>
+                )}
+              </div>
+              {showCsvHelp && (
+                <div className="mb-3 p-4 rounded-xl bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] text-[11px] text-[var(--theme-text)]/70 space-y-2">
+                  <p className="font-black text-[var(--theme-text)]">CSVファイルの作り方</p>
+                  <p>メールアドレスが含まれた列を自動検出します。ヘッダー行は自動スキップされます。</p>
+                  <div className="bg-[var(--theme-card-bg)] rounded-lg p-3 font-mono text-[10px] space-y-0.5">
+                    <p className="text-[var(--theme-text)]/40">--- パターン1: メールアドレスだけ ---</p>
+                    <p>yamada@example.com</p>
+                    <p>sato@example.com</p>
+                  </div>
+                  <div className="bg-[var(--theme-card-bg)] rounded-lg p-3 font-mono text-[10px] space-y-0.5">
+                    <p className="text-[var(--theme-text)]/40">--- パターン2: ヘッダー付きCSV ---</p>
+                    <p>名前,メールアドレス</p>
+                    <p>山田太郎,yamada@example.com</p>
+                    <p>佐藤花子,sato@example.com</p>
+                  </div>
+                  <div className="bg-[var(--theme-card-bg)] rounded-lg p-3 font-mono text-[10px] space-y-0.5">
+                    <p className="text-[var(--theme-text)]/40">--- パターン3: 複数列CSV ---</p>
+                    <p>id,name,email,phone</p>
+                    <p>1,山田太郎,yamada@example.com,+819012345678</p>
+                    <p>2,佐藤花子,sato@example.com,+818098765432</p>
+                  </div>
+                  <p className="text-[9px] text-[var(--theme-text)]/40">「email」「メール」「mail」を含む列名を自動検出します。該当列がない場合は1列目を使用します。Excelから直接コピー&ペーストも可能です。</p>
+                </div>
+              )}
               <textarea
                 value={sendRecipients}
                 onChange={(e) => setSendRecipients(e.target.value)}
-                placeholder={"test@example.com\nuser@example.com"}
-              rows={3}
-              className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
-            />
+                onPaste={handlePaste}
+                placeholder={"test@example.com\nuser@example.com\n\nExcelからの貼り付け・CSV取り込みも可能"}
+                rows={3}
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
+              />
+              <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">1行1件、またはカンマ/タブ区切り。Excelからの貼り付けにも対応</p>
             </div>
           )}
           {sendChannel === 'line_broadcast' && (
@@ -348,24 +593,25 @@ function SendSurveyContent() {
           )}
         </section>
 
+
         {/* 送信内容 */}
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] mb-6">
-          <h2 className="text-sm font-black italic uppercase mb-4">送信内容</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] mb-6">
+          <h2 className="text-sm font-black t-italic uppercase mb-4">送信内容</h2>
 
           {/* テンプレート選択 */}
           <div className="space-y-3 mb-5">
             <label className="text-[11px] font-black text-[var(--theme-text)]/60 block">テンプレートを選択</label>
             {([
-              { key: 'survey' as const, label: '📋 通常版', desc: 'アンケートのお願い — 誠実さを伝えるオーソドックスなスタイル' },
-              { key: 'campaign' as const, label: '🎁 特典あり版', desc: 'キャンペーン告知 — 特典をフックに回答率を最大化' },
-              { key: 'aftercare' as const, label: '💬 アフターフォロー版', desc: 'フォローのついでに依頼 — 気遣いから入る押し付けないスタイル' },
+              { key: 'survey' as const, label: '通常版', desc: 'アンケートのお願い — 誠実さを伝えるオーソドックスなスタイル' },
+              { key: 'campaign' as const, label: '特典あり版', desc: 'キャンペーン告知 — 特典をフックに回答率を最大化' },
+              { key: 'aftercare' as const, label: 'アフターフォロー版', desc: 'フォローのついでに依頼 — 気遣いから入る押し付けないスタイル' },
             ]).map((t) => (
               <button
                 key={t.key}
                 onClick={() => setTemplateType(t.key)}
-                className={`w-full text-left p-4 rounded-2xl border-[3px] transition-all ${
+                className={`w-full text-left p-4 rounded-2xl border-[length:var(--theme-bw)] transition-all ${
                   templateType === t.key
-                    ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 shadow-[4px_4px_0px_var(--theme-border)]'
+                    ? 'border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 shadow-[var(--theme-shadow-sm)]'
                     : 'border-[var(--theme-border)]'
                 }`}
               >
@@ -394,7 +640,7 @@ function SendSurveyContent() {
             <button
               onClick={applyTemplate}
               disabled={isGenerating}
-              className="w-full py-3 rounded-xl border-[3px] border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 font-black text-xs shadow-[4px_4px_0px_var(--theme-border)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-40"
+              className="w-full py-3 rounded-xl border-[length:var(--theme-bw)] border-[var(--theme-primary)] bg-[var(--theme-primary)]/10 font-black text-xs shadow-[var(--theme-shadow-sm)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-40"
             >
               {isGenerating ? '適用中...' : 'テンプレートを適用する'}
             </button>
@@ -414,44 +660,40 @@ function SendSurveyContent() {
             </div>
           )}
 
-          {/* メッセージ本文 */}
-          <div>
-            <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">メッセージ本文</label>
-            <textarea
-              value={sendMessage}
-              onChange={(e) => setSendMessage(e.target.value)}
-              placeholder="テンプレートを適用するか、直接入力してください"
-              rows={8}
-              className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
-            />
-            <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">※ テンプレート適用後に自由に編集できます</p>
-          </div>
-
-          {/* メールプレビュー */}
-          {sendChannel === 'email' && emailHtml && (
-            <div className="mt-4">
-              <button
-                onClick={() => setShowPreview(!showPreview)}
-                className="text-[11px] font-black text-[var(--theme-primary)] mb-2"
-              >
-                {showPreview ? '▼ プレビューを閉じる' : '▶ メールプレビューを表示'}
-              </button>
-              {showPreview && (
-                <div className="border-2 border-[var(--theme-border)] rounded-xl overflow-hidden" style={{ height: '500px' }}>
-                  <iframe
-                    srcDoc={emailHtml}
-                    className="w-full h-full border-none"
-                    title="メールプレビュー"
-                  />
-                </div>
-              )}
+          {/* メールプレビュー＆編集（メール選択時） */}
+          {sendChannel === 'email' && emailHtml ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[11px] font-black text-[var(--theme-text)]/60">メール本文（クリックして直接編集）</label>
+              </div>
+              <div className="border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-xl overflow-hidden" style={{ height: '600px' }}>
+                <iframe
+                  ref={(el) => { (iframeRef as React.MutableRefObject<HTMLIFrameElement | null>).current = el; setupEditableIframe(el); }}
+                  srcDoc={emailHtml}
+                  className="w-full h-full border-none"
+                  title="メールプレビュー編集"
+                />
+              </div>
+              <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">※ テキスト部分をクリックすると直接編集できます。編集内容はそのまま送信されます。</p>
             </div>
-          )}
+          ) : sendChannel !== 'email' || !emailHtml ? (
+            <div>
+              <label className="text-[11px] font-black text-[var(--theme-text)]/60 mb-2 block">メッセージ本文</label>
+              <textarea
+                value={sendMessage}
+                onChange={(e) => setSendMessage(e.target.value)}
+                placeholder="テンプレートを適用するか、直接入力してください"
+                rows={8}
+                className="w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-4 py-3 text-sm"
+              />
+              <p className="text-[9px] text-[var(--theme-text)]/40 mt-1">※ テンプレート適用後に自由に編集できます</p>
+            </div>
+          ) : null}
         </section>
 
         {/* 結果表示 */}
         {sendResult && (
-          <div className={`mb-6 p-4 rounded-2xl border-[3px] text-sm font-bold ${
+          <div className={`mb-6 p-4 rounded-2xl border-[length:var(--theme-bw)] text-sm font-bold ${
             sendResult.success ? 'bg-green-50 border-green-300 text-green-800' : 'bg-red-50 border-red-300 text-red-800'
           }`}>
             {sendResult.message}
@@ -462,7 +704,7 @@ function SendSurveyContent() {
         <button
           onClick={handleSend}
           disabled={sendLoading}
-          className="w-full bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-[3px] border-[var(--theme-border)] py-5 rounded-2xl font-black text-sm italic shadow-[8px_8px_0px_var(--theme-border)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-60"
+          className="w-full bg-[var(--theme-primary)] text-[var(--theme-on-primary)] border-[length:var(--theme-bw)] border-[var(--theme-border)] py-5 rounded-2xl font-black text-sm t-italic shadow-[var(--theme-shadow)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-60"
         >
           {sendLoading ? '送信中...' : '送信する'}
         </button>

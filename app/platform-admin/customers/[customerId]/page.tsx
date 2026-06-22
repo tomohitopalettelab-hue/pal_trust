@@ -72,8 +72,8 @@ function SendSettingsSection({
   const inputCls = "w-full bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 text-sm disabled:opacity-70";
 
   return (
-    <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] space-y-5">
-      <h2 className="text-xl font-black italic">送信設定</h2>
+    <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] space-y-5">
+      <h2 className="text-xl font-black t-italic">送信設定</h2>
 
       {/* サービス名 */}
       <div className="bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl p-4 space-y-2">
@@ -91,43 +91,39 @@ function SendSettingsSection({
         </label>
       </div>
 
-      {/* SMS (Twilio) */}
+      {/* SMS (Vonage) */}
       <div className="bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl p-4 space-y-3">
-        <h3 className="text-sm font-black">SMS（Twilio）</h3>
+        <h3 className="text-sm font-black">SMS（Vonage）</h3>
+        <p className="text-[10px] text-[var(--theme-text)]/50">
+          <a href="https://dashboard.nexmo.com/sign-up" target="_blank" rel="noopener noreferrer" className="underline text-[var(--theme-primary)]">Vonageアカウント作成</a>
+          {' '}→ Dashboard → API Settings からキーを取得
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <label className="space-y-1">
-            <span className="text-[11px] text-[var(--theme-text)]/70">Account SID</span>
+            <span className="text-[11px] text-[var(--theme-text)]/70">API Key</span>
             <input
               type="text"
-              value={isEditing ? String(editSettings.twilioAccountSid || '') : maskToken(String(currentSettings.twilioAccountSid || ''))}
-              onChange={(e) => setField('twilioAccountSid', e.target.value)}
+              value={isEditing ? String(editSettings.vonageApiKey || '') : maskToken(String(currentSettings.vonageApiKey || ''))}
+              onChange={(e) => setField('vonageApiKey', e.target.value)}
               disabled={!isEditing}
-              placeholder="ACxxxxxxxxxx"
+              placeholder="abcd1234"
               className={inputCls}
             />
           </label>
           <label className="space-y-1">
-            <span className="text-[11px] text-[var(--theme-text)]/70">Auth Token</span>
+            <span className="text-[11px] text-[var(--theme-text)]/70">API Secret</span>
             <input
               type={isEditing ? 'text' : 'password'}
-              value={isEditing ? String(editSettings.twilioAuthToken || '') : String(currentSettings.twilioAuthToken || '')}
-              onChange={(e) => setField('twilioAuthToken', e.target.value)}
+              value={isEditing ? String(editSettings.vonageApiSecret || '') : String(currentSettings.vonageApiSecret || '')}
+              onChange={(e) => setField('vonageApiSecret', e.target.value)}
               disabled={!isEditing}
               placeholder="xxxxxxxxxx"
               className={inputCls}
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-[11px] text-[var(--theme-text)]/70">送信元電話番号</span>
-            <input
-              type="text"
-              value={String(settings.twilioPhoneNumber || '')}
-              onChange={(e) => setField('twilioPhoneNumber', e.target.value)}
-              disabled={!isEditing}
-              placeholder="+8150xxxxxxxx"
-              className={inputCls}
-            />
-          </label>
+          <div className="flex items-center">
+            <span className="text-[10px] text-[var(--theme-text)]/50">送信元名はサービス名（メッセージ表示名）を使用します</span>
+          </div>
         </div>
         {smsQuota && <QuotaBar used={smsQuota.used} limit={smsQuota.limit} label="今月のSMS送信" />}
       </div>
@@ -283,8 +279,10 @@ export default function CustomerDetailPage() {
   const surveyGoogleMapUrl = String(currentSettings.googleMapUrl || '');
   const mainPath = detail?.mainPagePath || `/main?customerId=${encodeURIComponent(customerId)}`;
   const surveyPath = `/survey?customerId=${encodeURIComponent(customerId)}`;
+  const demoPath = `/survey?customerId=${encodeURIComponent(customerId)}&demo=1`;
   const mainUrl = `${baseUrl}${mainPath}`;
   const surveyUrl = `${baseUrl}${surveyPath}`;
+  const demoUrl = `${baseUrl}${demoPath}`;
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -335,6 +333,34 @@ export default function CustomerDetailPage() {
     setEditSurveyItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // 事例活用可は編集モードに関係なく即保存（トグル）
+  const handleToggleCaseUsable = async (checked: boolean) => {
+    if (!detail || isSaving) return;
+    setIsSaving(true);
+    const nextSettings = { ...(detail.settings || {}), caseUsable: checked };
+    try {
+      const res = await fetch(`/api/admin/customers/${encodeURIComponent(customerId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName: detail.customerName || editCustomerName,
+          mainPagePath: detail.mainPagePath || editMainPagePath,
+          settings: nextSettings,
+          surveyItems: Array.isArray(detail.surveyItems) ? detail.surveyItems : editSurveyItems,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '保存に失敗しました');
+      setDetail({ ...detail, settings: nextSettings });
+      setEditSettings((prev) => ({ ...prev, caseUsable: checked }));
+      showNotice(checked ? '事例活用可にしました' : '事例活用可を解除しました');
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : '保存に失敗しました', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[var(--theme-bg)] text-[var(--theme-text)] p-6 md:p-10 font-sans">
       {notice && (
@@ -348,7 +374,7 @@ export default function CustomerDetailPage() {
         <header className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-black uppercase tracking-widest text-[var(--theme-text)]/50">Platform Admin</p>
-            <h1 className="text-3xl md:text-4xl font-black italic tracking-tight">顧客詳細</h1>
+            <h1 className="text-3xl md:text-4xl font-black t-italic tracking-tight">顧客詳細</h1>
             <p className="text-sm font-bold text-[var(--theme-text)]/60 mt-2">顧客ID: {customerId}</p>
           </div>
           <Link
@@ -377,8 +403,8 @@ export default function CustomerDetailPage() {
           )}
         </section>
 
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] space-y-3">
-          <h2 className="text-xl font-black italic">基本情報</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] space-y-3">
+          <h2 className="text-xl font-black t-italic">基本情報</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm font-black">
             <label className="space-y-1">
               <span className="text-[11px] text-[var(--theme-text)]/70">顧客名</span>
@@ -402,12 +428,66 @@ export default function CustomerDetailPage() {
               />
             </label>
             <p className="md:col-span-2">main URL: {mainUrl || mainPath}</p>
-            <p>survey URL: {surveyUrl || surveyPath}</p>
+            <p className="md:col-span-2">survey URL: {surveyUrl || surveyPath}</p>
+
+            {/* 事例活用可（編集モード不要・クリック即保存） */}
+            <div className="md:col-span-2 mt-2 flex items-center justify-between gap-3 p-3 rounded-xl border-2 border-[var(--theme-border)] bg-[var(--theme-bg)]">
+              <div>
+                <div className="text-sm font-black">事例活用可</div>
+                <div className="text-[10px] text-[var(--theme-text)]/60 font-normal">Palette Lab の導入事例に匿名（業種＋数値＋デモURL）で掲載</div>
+              </div>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => handleToggleCaseUsable(!Boolean(currentSettings.caseUsable))}
+                className={`px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] text-xs font-black shrink-0 active:translate-y-0.5 transition-all disabled:opacity-60 ${Boolean(currentSettings.caseUsable) ? 'bg-[var(--theme-primary)] text-[var(--theme-on-primary)]' : 'bg-[var(--theme-card-bg)]'}`}
+              >
+                {isSaving ? '保存中...' : Boolean(currentSettings.caseUsable) ? '✓ 活用可' : '活用不可'}
+              </button>
+            </div>
+
+            {/* デモURL生成 */}
+            <div className="md:col-span-2 mt-3 p-4 rounded-xl border-2 border-dashed border-[var(--theme-primary)] bg-[var(--theme-primary)]/5">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-black t-italic">🎬 デモサイトURL</span>
+                <span className="text-[9px] text-[var(--theme-text)]/50">回答してもデータは保存されません（動作確認用）</span>
+              </div>
+              <div className="flex flex-col md:flex-row gap-2">
+                <input
+                  value={demoUrl}
+                  readOnly
+                  className="flex-1 bg-[var(--theme-bg)] border-2 border-[var(--theme-border)] rounded-xl px-3 py-2 text-[11px] font-mono"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(demoUrl);
+                      showNotice('デモURLをコピーしました', 'success');
+                    } catch {
+                      showNotice('コピーに失敗しました', 'error');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] bg-[var(--theme-primary)] text-[var(--theme-on-primary)] text-xs font-black active:translate-y-0.5 transition-all shrink-0"
+                >
+                  URLをコピー
+                </button>
+                <a
+                  href={demoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-xl border-2 border-[var(--theme-border)] bg-[var(--theme-card-bg)] text-xs font-black text-center active:translate-y-0.5 transition-all shrink-0"
+                >
+                  デモを開く →
+                </a>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] space-y-3">
-          <h2 className="text-xl font-black italic">現在の設定（main / survey）</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] space-y-3">
+          <h2 className="text-xl font-black t-italic">現在の設定（main / survey）</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm font-black">
             <label className="space-y-1">
               <span className="text-[11px] text-[var(--theme-text)]/70">表示アプリ名</span>
@@ -496,9 +576,9 @@ export default function CustomerDetailPage() {
           currentSettings={currentSettings}
         />
 
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] space-y-3">
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-xl font-black italic">Survey設問データ</h2>
+            <h2 className="text-xl font-black t-italic">Survey設問データ</h2>
             {isEditing && (
               <button
                 onClick={handleAddSurveyItem}
@@ -547,8 +627,8 @@ export default function CustomerDetailPage() {
           )}
         </section>
 
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)] space-y-3">
-          <h2 className="text-xl font-black italic">回答データ（最新20件）</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)] space-y-3">
+          <h2 className="text-xl font-black t-italic">回答データ（最新20件）</h2>
           <p className="text-sm font-black text-[var(--theme-text)]/70">
             件数: {detail?.surveyCount ?? 0} / 平均評価: {(detail?.averageRating ?? 0).toFixed(2)}
           </p>

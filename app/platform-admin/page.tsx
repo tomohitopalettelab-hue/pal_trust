@@ -247,7 +247,7 @@ export default function PlatformAdminPage() {
         <header className="flex items-start justify-between">
           <div>
             <p className="text-xs font-black uppercase tracking-widest text-[var(--theme-text)]/50">Platform Admin</p>
-            <h1 className="text-3xl md:text-4xl font-black italic tracking-tight">顧客別データ管理</h1>
+            <h1 className="text-3xl md:text-4xl font-black t-italic tracking-tight">顧客別データ管理</h1>
             {agencyName && <p className="text-sm font-bold text-[var(--theme-text)]/60 mt-1">{agencyName}</p>}
           </div>
           <button
@@ -265,8 +265,8 @@ export default function PlatformAdminPage() {
           </button>
         </header>
 
-        <section className="bg-[var(--theme-card-bg)] border-[3px] border-[var(--theme-border)] rounded-[2rem] p-6 shadow-[8px_8px_0px_var(--theme-border)]">
-          <h2 className="text-xl font-black italic mb-4">顧客一覧（main / survey 提供情報）</h2>
+        <section className="bg-[var(--theme-card-bg)] border-[length:var(--theme-bw)] border-[var(--theme-border)] rounded-[var(--theme-radius)] p-6 shadow-[var(--theme-shadow)]">
+          <h2 className="text-xl font-black t-italic mb-4">顧客一覧（main / survey 提供情報）</h2>
 
           <div className="mb-4">
             <input

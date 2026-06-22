@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Pal Trust アイコン: 星 × マップピン -->
+
+  <!-- 黒オフセットシャドウ -->
+  <g transform="translate(26 22) scale(2.02)">
+    <path d="M 120 14
+             C 172 14 206 50 206 98
+             C 206 152 150 196 120 230
+             C 90 196 34 152 34 98
+             C 34 50 68 14 120 14 Z"
+          fill="#111111"/>
+  </g>
+
+  <!-- ピン本体（イエロー） -->
+  <g transform="translate(10 8) scale(2.02)">
+    <path d="M 120 14
+             C 172 14 206 50 206 98
+             C 206 152 150 196 120 230
+             C 90 196 34 152 34 98
+             C 34 50 68 14 120 14 Z"
+          fill="#F9C11C" stroke="#111111" stroke-width="11"/>
+    <path d="M 120 50 L 138 88 L 180 93 L 150 122 L 158 164 L 120 144 L 82 164 L 90 122 L 60 93 L 102 88 Z"
+          fill="#FFFFFF" stroke="#111111" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+</svg>

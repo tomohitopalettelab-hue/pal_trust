@@ -1,4 +1,4 @@
-import { listCrmCustomers, type CrmCustomer } from './palette-crm-client';
+import { listCrmCustomers, getPalTrustCustomerIds, type CrmCustomer } from './palette-crm-client';
 
 export type PalTrustAccount = {
   id: string;
@@ -28,10 +28,13 @@ const crmToTrustAccount = (c: CrmCustomer): PalTrustAccount => ({
 });
 
 export const listTrustAccountsFromPalDb = async (): Promise<PalTrustAccount[]> => {
-  const customers = await listCrmCustomers();
-  // palette_crmの全顧客をPalTrustAccountとして返す（pal_trust契約フィルタは呼び出し側で必要に応じて実施）
+  const [customers, palTrustCustomerIds] = await Promise.all([
+    listCrmCustomers(),
+    getPalTrustCustomerIds(),
+  ]);
+  // Pal Trust契約中の顧客のみを返す
   return customers
-    .filter((c) => c.loginId && c.status === 'active')
+    .filter((c) => c.loginId && c.status === 'active' && palTrustCustomerIds.has(c.id))
     .map(crmToTrustAccount);
 };
 
