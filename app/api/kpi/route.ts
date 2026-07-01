@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 import { ensureSurveysTable } from '../_lib/ensure-surveys-table';
+import { isCustomerSuspended } from '../_lib/palette-crm-client';
 
 export async function GET(req: NextRequest) {
   const cid = req.nextUrl.searchParams.get('cid');
   if (!cid) return NextResponse.json({ error: 'cid is required' }, { status: 400 });
+  if (await isCustomerSuspended(cid)) return NextResponse.json({ error: 'このアカウントは停止中です' }, { status: 403 });
 
   try {
     await ensureSurveysTable();

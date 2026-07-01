@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 import { ensureSurveySendsTable } from '@/app/api/_lib/ensure-survey-sends-table';
+import { isCustomerSuspended } from '@/app/api/_lib/palette-crm-client';
 
 export async function GET(req: NextRequest) {
   const customerId = req.nextUrl.searchParams.get('customerId');
   if (!customerId) {
     return NextResponse.json({ error: 'customerId is required' }, { status: 400 });
   }
+  if (await isCustomerSuspended(customerId)) return NextResponse.json({ error: 'このアカウントは停止中です' }, { status: 403 });
 
   const channel = req.nextUrl.searchParams.get('channel') || '';
 

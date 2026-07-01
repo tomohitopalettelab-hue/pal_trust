@@ -1,6 +1,7 @@
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
 import { ensureSurveySendsTable } from '@/app/api/_lib/ensure-survey-sends-table';
+import { isCustomerSuspended } from '@/app/api/_lib/palette-crm-client';
 
 type SendRequest = {
   customerId: string;
@@ -150,6 +151,7 @@ export async function POST(request: Request) {
     if (!customerId || !channel || !recipients?.length) {
       return NextResponse.json({ error: 'customerId, channel, recipients は必須です' }, { status: 400 });
     }
+    if (await isCustomerSuspended(customerId)) return NextResponse.json({ error: 'このアカウントは停止中です' }, { status: 403 });
 
     await ensureSurveySendsTable();
     const settings = await getCustomerSettings(customerId);

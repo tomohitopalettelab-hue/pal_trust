@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
+import { isCustomerSuspended } from '@/app/api/_lib/palette-crm-client';
 import {
   surveyEmailHtml, surveyEmailSubject,
   campaignEmailHtml, campaignEmailSubject,
@@ -103,6 +104,8 @@ export async function POST(req: Request) {
       campaign?: string;
       headerImageUrl?: string;
     };
+
+    if (await isCustomerSuspended(customerId)) return NextResponse.json({ error: 'このアカウントは停止中です' }, { status: 403 });
 
     const template = TEMPLATES[templateType];
     if (!template) {

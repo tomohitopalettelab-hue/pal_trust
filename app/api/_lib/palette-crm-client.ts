@@ -3,6 +3,20 @@ import { palDbPost } from './pal-db-client';
 const getCanvasUrl = (): string =>
   process.env.PALETTE_CANVAS_URL?.trim() || 'https://palettecrm.vercel.app';
 
+/** Palette Lab で一時停止(status!=='active')された顧客か。Canvas障害時は false（fail-open）。
+ *  key は customerId(=paletteId or login_id いずれか一致)。 */
+export const isCustomerSuspended = async (key: string): Promise<boolean> => {
+  const k = String(key || '').trim();
+  if (!k) return false;
+  try {
+    const res = await fetch(`${getCanvasUrl()}/api/pal-db/account-active?key=${encodeURIComponent(k)}`, {
+      cache: 'no-store', headers: { 'x-crm-service-key': process.env.CRM_SERVICE_KEY ?? '' },
+    });
+    const d = (await res.json().catch(() => ({}))) as { active?: boolean };
+    return !!(d && d.active === false);
+  } catch { return false; }
+};
+
 export type CrmCustomer = {
   id: string;
   companyName: string;
