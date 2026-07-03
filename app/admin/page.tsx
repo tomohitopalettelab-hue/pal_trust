@@ -46,7 +46,8 @@ function OwnerDashboardContent() {
   const [latestFeedbackQa, setLatestFeedbackQa] = useState<{ question: string; answer: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [customerActive, setCustomerActive] = useState<boolean | null>(null);
-  const [adminGoogleMapUrl, setAdminGoogleMapUrl] = useState('https://business.google.com/');
+  const [adminGoogleMapUrl, setAdminGoogleMapUrl] = useState('https://business.google.com/'); // クチコミ投稿先（ビジネスプロフィール）
+  const [googleMapUrl, setGoogleMapUrl] = useState(''); // GoogleマップURL（店舗ページ）＝「Googleマップ」ボタンの遷移先
   const [qrColorHex, setQrColorHex] = useState('000000');
   const [isDownloadingQr, setIsDownloadingQr] = useState(false);
   const { notice, showNotice, clearNotice } = useNotice();
@@ -187,6 +188,7 @@ function OwnerDashboardContent() {
         const data = await response.json();
         const settingsData = await settingsResponse.json();
         setAdminGoogleMapUrl(String(settingsData?.settings?.adminGoogleMapUrl || 'https://business.google.com/'));
+        setGoogleMapUrl(String(settingsData?.settings?.googleMapUrl || ''));
         const configuredItems: SettingsSurveyItem[] = Array.isArray(settingsData?.surveyItems) ? settingsData.surveyItems : [];
         const questionById = new Map<string, { text: string; type: string }>();
         configuredItems.forEach((item) => {
@@ -601,8 +603,8 @@ function OwnerDashboardContent() {
                 </button>
               </Link>
 
-              {/* 3. Googleマップ */}
-              <a href={adminGoogleMapUrl} target="_blank" rel="noopener noreferrer" className="w-full">
+              {/* 3. Googleマップ（店舗ページ＝googleMapUrl。未設定時のみクチコミ投稿先にフォールバック） */}
+              <a href={googleMapUrl || adminGoogleMapUrl} target="_blank" rel="noopener noreferrer" className="w-full">
                 <button className="w-full h-full bg-[var(--theme-card-bg)] text-[var(--theme-text)] border-[length:var(--theme-bw)] border-[var(--theme-border)] p-8 rounded-[var(--theme-radius-lg)] flex flex-col lg:flex-row items-center justify-center gap-4 shadow-[var(--theme-shadow)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all">
                   <span className="text-5xl lg:text-3xl">🌐</span>
                   <span className="text-xs font-black t-italic uppercase">Googleマップ</span>
