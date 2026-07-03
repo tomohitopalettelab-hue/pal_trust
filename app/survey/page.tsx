@@ -30,7 +30,8 @@ type AppSettings = {
   appName?: string;
   appSubtitle?: string;
   minStarsForGoogle?: string | number;
-  googleMapUrl?: string;
+  googleMapUrl?: string;           // GoogleマップURL（店舗ページ・任意）
+  adminGoogleMapUrl?: string;      // GoogleビジネスプロフィールURL（クチコミ投稿先）＝高評価時の遷移先
   lowRatingMessage?: string;
   industry?: string;
   aiReviewTaste?: string;
@@ -417,8 +418,10 @@ function SurveyPageContent() {
         }
         showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success', 5000);
         await new Promise(resolve => setTimeout(resolve, 2000));
-        if (appSettings?.googleMapUrl) {
-          window.location.href = appSettings.googleMapUrl;
+        // 高評価は「クチコミ投稿先（GoogleビジネスプロフィールURL）」へ遷移。未設定なら店舗ページURLにフォールバック。
+        const reviewUrl = appSettings?.adminGoogleMapUrl || appSettings?.googleMapUrl;
+        if (reviewUrl) {
+          window.location.href = reviewUrl;
         }
       };
       // 低評価ルートの最終アクション（サンクスページ）
