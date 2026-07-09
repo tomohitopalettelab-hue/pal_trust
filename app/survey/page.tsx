@@ -48,6 +48,24 @@ type AppSettings = {
   };
 };
 
+// 「口コミを書く」ダイアログを直接開くディープリンクかどうか。
+// g.page/r/<CID>/review や search.google.com/local/writereview?placeid=... が該当。
+// 単なるマップ共有リンク（maps.app.goo.gl / goo.gl/maps 等）は口コミ投稿画面を開けない。
+const isReviewDeepLink = (url?: string): boolean =>
+  !!url && /(g\.page\/r\/[^/]+\/review|search\.google\.[a-z.]*\/local\/writereview|[?&]placeid=|\/writereview\b)/i.test(url);
+
+// 高評価時に遷移させる「口コミ投稿先」を決定する。
+// 設定欄（adminGoogleMapUrl=投稿先 / googleMapUrl=店舗ページ）が取り違えられていても、
+// 2つのURLのうち口コミ投稿ディープリンクを最優先で選ぶ（マップ共有リンクへの誤遷移を防ぐ）。
+// どちらも口コミリンクでなければ従来どおり 投稿先→店舗ページ の順でフォールバック。
+const pickReviewUrl = (admin?: string, map?: string): string => {
+  const a = (admin || '').trim();
+  const m = (map || '').trim();
+  if (isReviewDeepLink(a)) return a;
+  if (isReviewDeepLink(m)) return m;
+  return a || m;
+};
+
 type AnswerValue = string | number | string[];
 
 const normalizeSurveyItems = (items: unknown): SurveyItem[] => {
@@ -418,8 +436,9 @@ function SurveyPageContent() {
         }
         showNotice('口コミ内容をコピーしました！Google口コミ画面に貼り付けてください', 'success', 5000);
         await new Promise(resolve => setTimeout(resolve, 2000));
-        // 高評価は「クチコミ投稿先（GoogleビジネスプロフィールURL）」へ遷移。未設定なら店舗ページURLにフォールバック。
-        const reviewUrl = appSettings?.adminGoogleMapUrl || appSettings?.googleMapUrl;
+        // 高評価は口コミ投稿先へ遷移。2つの設定URLから口コミ投稿リンクを優先選択する
+        // （設定欄の取り違えでマップ共有リンクへ誤遷移するのを防ぐ）。
+        const reviewUrl = pickReviewUrl(appSettings?.adminGoogleMapUrl, appSettings?.googleMapUrl);
         if (reviewUrl) {
           window.location.href = reviewUrl;
         }
